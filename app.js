@@ -25,17 +25,16 @@ app.use(helmet({
 }));
 
 // CORS - Allow all origins for Railway deployment
-app.use(cors({
+const corsOptions = {
   origin: true,  // Reflect the request origin
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
   credentials: true,
   preflightContinue: false,
   optionsSuccessStatus: 204
-}));
+};
 
-// Handle preflight requests
-app.options('*', cors());
+app.use(cors(corsOptions));
 
 // Rate limiting
 const limiter = rateLimit({
