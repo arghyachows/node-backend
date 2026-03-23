@@ -17,24 +17,29 @@ const server = http.createServer(app);
 const io = initSocket(server);
 app.set('io', io);
 
-// Middleware
+// Middleware - Simplified CORS for Railway
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
+
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
   crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
   crossOriginEmbedderPolicy: false,
 }));
 
-// CORS - Allow all origins for Railway deployment
-const corsOptions = {
-  origin: true,  // Reflect the request origin
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+app.use(cors({
+  origin: true,
   credentials: true,
-  preflightContinue: false,
-  optionsSuccessStatus: 204
-};
-
-app.use(cors(corsOptions));
+}));
 
 // Rate limiting
 const limiter = rateLimit({
