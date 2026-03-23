@@ -6,8 +6,14 @@ function initSocket(server) {
     cors: {
       origin: '*',
       methods: ['GET', 'POST'],
+      credentials: false,
     },
     transports: ['websocket', 'polling'],
+    allowEIO3: true,
+    pingInterval: 25000,
+    pingTimeout: 20000,
+    upgradeTimeout: 30000,
+    allowUpgrades: true,
   });
 
   io.on('connection', (socket) => {
