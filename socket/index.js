@@ -4,14 +4,16 @@ const logger = require("../utils/logger");
 function initSocket(server) {
   const io = new Server(server, {
     cors: {
-      origin: "*",
-      methods: ["GET", "POST"],
-      credentials: false,
+      origin: true,  // Reflect the request origin
+      methods: ['GET', 'POST', 'OPTIONS'],
+      credentials: true,
+      allowedHeaders: ['Content-Type', 'Authorization'],
     },
-    transports: ["polling", "websocket"], // Polling first for Railway
-    allowEIO3: true, // Allow Engine.IO v3 clients
+    transports: ['polling', 'websocket'],  // Polling first for Railway
+    allowEIO3: true,  // Allow Engine.IO v3 clients
     pingTimeout: 60000,
     pingInterval: 25000,
+    cookie: false,  // Disable cookies for cross-origin
   });
 
   io.on("connection", (socket) => {
