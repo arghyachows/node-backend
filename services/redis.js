@@ -1,7 +1,17 @@
 const Redis = require('ioredis');
 const logger = require('../utils/logger');
 
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
+// Parse REDIS_URL to extract credentials explicitly.
+// Railway Redis URLs follow the format: redis://:password@host:port
+// ioredis can sometimes fail to apply auth from the URL alone, so we
+// extract the password and pass it as a discrete option to guarantee
+// AUTH is sent on every (re)connection.
+const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+const parsedUrl = new URL(redisUrl);
+const redisPassword = parsedUrl.password || undefined;
+
+const redis = new Redis(redisUrl, {
+  password: redisPassword,
   retryStrategy: (times) => {
     const delay = Math.min(times * 50, 2000);
     return delay;
