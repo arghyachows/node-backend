@@ -737,6 +737,77 @@ router.post('/:tournamentId/run-all', async (req, res) => {
   }
 });
 
+// ─── Force-complete a stuck match ─────────────────────────────────
+router.post('/:tournamentId/force-complete/:matchId', async (req, res) => {
+  try {
+    const { tournamentId, matchId } = req.params;
+
+    // Check if the match is actually stuck
+    const { data: match, error } = await supabase
+      .from('matches')
+      .select('*')
+      .eq('id', matchId)
+      .eq('tournament_id', tournamentId)
+      .single();
+
+    if (error || !match) {
+      return res.status(404).json({ error: 'Match not found' });
+    }
+    if (match.status === 'completed') {
+      return res.json({ success: true, message: 'Match already completed' });
+    }
+
+    // Stop the engine if it's still running
+    const engine = activeTournamentMatches.get(matchId);
+    if (engine) {
+      engine.stop();
+      activeTournamentMatches.delete(matchId);
+    }
+
+    // Try to get state from Redis
+    let state = null;
+    try {
+      state = await getMatchState(matchId);
+    } catch (e) { /* ignore */ }
+
+    const homeScore = state?.score1 ?? match.home_score ?? 0;
+    const awayScore = state?.score2 ?? match.away_score ?? 0;
+    const homeWickets = state?.wickets1 ?? match.home_wickets ?? 0;
+    const awayWickets = state?.wickets2 ?? match.away_wickets ?? 0;
+    const hbf = state?.homeBatsFirst ?? true;
+
+    const finalHomeScore = hbf ? homeScore : awayScore;
+    const finalAwayScore = hbf ? awayScore : homeScore;
+    const finalHomeWickets = hbf ? homeWickets : awayWickets;
+    const finalAwayWickets = hbf ? awayWickets : awayWickets;
+
+    let winnerTeamId = null;
+    if (finalHomeScore > finalAwayScore) winnerTeamId = match.home_team_id;
+    else if (finalAwayScore > finalHomeScore) winnerTeamId = match.away_team_id;
+
+    await supabase
+      .from('matches')
+      .update({
+        status: 'completed',
+        home_score: finalHomeScore,
+        home_wickets: finalHomeWickets,
+        away_score: finalAwayScore,
+        away_wickets: finalAwayWickets,
+        winner_team_id: winnerTeamId,
+        completed_at: new Date().toISOString(),
+      })
+      .eq('id', matchId);
+
+    try { await removeActiveMatch(matchId); } catch (e) { /* ignore */ }
+
+    logger.info(`🔧 Force-completed match ${matchId} in tournament ${tournamentId}`);
+    res.json({ success: true, homeScore: finalHomeScore, awayScore: finalAwayScore, winnerTeamId });
+  } catch (error) {
+    logger.error('Force-complete error:', error);
+    res.status(500).json({ error: 'Failed to force-complete match' });
+  }
+});
+
 // ─── Tournament Match Engine ──────────────────────────────────────
 
 class TournamentMatchEngine extends MatchEngine {
