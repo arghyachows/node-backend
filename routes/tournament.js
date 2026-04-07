@@ -557,6 +557,40 @@ router.post('/:tournamentId/run-match/:matchId', async (req, res) => {
   }
 });
 
+// ─── Get match commentary (from Redis for live, DB for completed) ─
+
+router.get('/match/:matchId/commentary', async (req, res) => {
+  try {
+    const { matchId } = req.params;
+
+    // Try Redis first (live or recently completed)
+    const redisState = await getMatchState(matchId);
+    if (redisState?.commentaryLog?.length) {
+      return res.json({ commentaryLog: redisState.commentaryLog });
+    }
+
+    // Fallback to DB (commentary_log column may not exist yet)
+    try {
+      const { data: match, error } = await supabase
+        .from('matches')
+        .select('commentary_log')
+        .eq('id', matchId)
+        .single();
+
+      if (!error && match?.commentary_log?.length) {
+        return res.json({ commentaryLog: match.commentary_log });
+      }
+    } catch (dbErr) {
+      // Column may not exist yet — that's OK
+    }
+
+    res.json({ commentaryLog: [] });
+  } catch (error) {
+    logger.error('Error fetching commentary:', error);
+    res.json({ commentaryLog: [] });
+  }
+});
+
 // ─── Get active tournament match for a user ───────────────────────
 
 router.get('/user/:userId/active-match', async (req, res) => {
@@ -734,9 +768,6 @@ class TournamentMatchEngine extends MatchEngine {
         overNumber: result.overNumber,
         ballNumber: result.ballNumber,
       });
-      if (this.commentaryLog.length > 20) {
-        this.commentaryLog.shift();
-      }
 
       // Emit to WebSocket room (for live viewers)
       this.io.to(this.matchId).emit('ballUpdate', {
@@ -793,20 +824,31 @@ class TournamentMatchEngine extends MatchEngine {
 
     // Update match in DB
     try {
-      await this.supabaseClient
-        .from('matches')
-        .update({
-          status: 'completed',
-          home_score: homeScore,
-          home_wickets: homeWickets,
-          away_score: awayScore,
-          away_wickets: awayWickets,
-          home_overs: homeOvers || this.maxOvers,
-          away_overs: awayOvers || this.maxOvers,
-          winner_team_id: winnerTeamId,
-          completed_at: new Date().toISOString(),
-        })
-        .eq('id', this.matchId);
+      const updateData = {
+        status: 'completed',
+        home_score: homeScore,
+        home_wickets: homeWickets,
+        away_score: awayScore,
+        away_wickets: awayWickets,
+        home_overs: homeOvers || this.maxOvers,
+        away_overs: awayOvers || this.maxOvers,
+        winner_team_id: winnerTeamId,
+        completed_at: new Date().toISOString(),
+      };
+
+      // Try saving commentary_log if column exists
+      try {
+        await this.supabaseClient
+          .from('matches')
+          .update({ ...updateData, commentary_log: this.commentaryLog })
+          .eq('id', this.matchId);
+      } catch (colErr) {
+        // Fallback: save without commentary_log if column doesn't exist yet
+        await this.supabaseClient
+          .from('matches')
+          .update(updateData)
+          .eq('id', this.matchId);
+      }
     } catch (err) {
       logger.error(`Failed to update match ${this.matchId}:`, err);
     }
@@ -819,6 +861,7 @@ class TournamentMatchEngine extends MatchEngine {
       matchId: this.matchId,
       result: matchResult,
       state: this.getState(),
+      commentaryLog: this.commentaryLog,
     });
 
     await setMatchState(this.matchId, this.serialize());

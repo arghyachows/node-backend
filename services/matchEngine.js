@@ -106,7 +106,7 @@ class MatchEngine {
         return;
       }
 
-      // Add to commentary log (last 20 balls)
+      // Add to commentary log (keep all balls for match history)
       this.commentaryLog.push({
         commentary: result.commentary,
         eventType: result.eventType,
@@ -115,9 +115,6 @@ class MatchEngine {
         overNumber: result.overNumber,
         ballNumber: result.ballNumber,
       });
-      if (this.commentaryLog.length > 20) {
-        this.commentaryLog.shift();
-      }
 
       // Emit to WebSocket room
       this.io.to(this.matchId).emit('ballUpdate', {
@@ -162,6 +159,7 @@ class MatchEngine {
       matchId: this.matchId,
       result: matchResult,
       state: this.getState(),
+      commentaryLog: this.commentaryLog,
     });
 
     // Save final state

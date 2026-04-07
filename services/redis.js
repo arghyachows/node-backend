@@ -31,7 +31,8 @@ redis.on('error', (err) => {
 const redisHelper = {
   // Match state
   async setMatchState(matchId, state) {
-    await redis.set(`match:${matchId}`, JSON.stringify(state), 'EX', 3600);
+    // 24 hours TTL so completed match commentary persists for viewing
+    await redis.set(`match:${matchId}`, JSON.stringify(state), 'EX', 86400);
   },
 
   async getMatchState(matchId) {
