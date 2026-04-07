@@ -170,6 +170,119 @@ function initScheduler(app) {
     }
   });
 
+  // Recovery: finalize in_progress tournaments where all matches are completed
+  // (handles server restarts that killed in-memory match engines)
+  cron.schedule('* * * * *', async () => {
+    try {
+      const { data: liveTournaments } = await supabase
+        .from('tournaments')
+        .select('id, name, prize_coins')
+        .eq('status', 'in_progress');
+
+      if (!liveTournaments || liveTournaments.length === 0) return;
+
+      for (const tournament of liveTournaments) {
+        const { data: incompleteMatches } = await supabase
+          .from('matches')
+          .select('id')
+          .eq('tournament_id', tournament.id)
+          .neq('status', 'completed');
+
+        if (incompleteMatches && incompleteMatches.length === 0) {
+          // All matches done — finalize tournament
+          logger.info(`🔄 Recovery: Finalizing tournament ${tournament.name} (${tournament.id})`);
+
+          // Get standings
+          const { data: standings } = await supabase
+            .from('tournament_participants')
+            .select('*')
+            .eq('tournament_id', tournament.id)
+            .order('points', { ascending: false })
+            .order('net_run_rate', { ascending: false });
+
+          if (standings && standings.length > 0) {
+            const totalPrize = tournament.prize_coins || 0;
+            const prizeDistribution = [
+              { position: 1, share: 0.5 },
+              { position: 2, share: 0.3 },
+              { position: 3, share: 0.2 },
+            ];
+
+            for (const prize of prizeDistribution) {
+              const participant = standings[prize.position - 1];
+              if (!participant || totalPrize <= 0) continue;
+
+              const coins = Math.floor(totalPrize * prize.share);
+              if (coins <= 0) continue;
+
+              const { data: user } = await supabase
+                .from('users')
+                .select('coins')
+                .eq('id', participant.user_id)
+                .single();
+              if (user) {
+                await supabase
+                  .from('users')
+                  .update({ coins: user.coins + coins })
+                  .eq('id', participant.user_id);
+              }
+
+              await supabase
+                .from('transactions')
+                .insert({
+                  user_id: participant.user_id,
+                  type: 'tournament_reward',
+                  coins_amount: coins,
+                  description: `${tournament.name} - ${prize.position}${prize.position === 1 ? 'st' : prize.position === 2 ? 'nd' : 'rd'} place`,
+                }).catch(() => {});
+
+              await supabase
+                .from('tournament_participants')
+                .update({ position: prize.position })
+                .eq('id', participant.id);
+            }
+          }
+
+          await supabase
+            .from('tournaments')
+            .update({ status: 'completed', ends_at: new Date().toISOString() })
+            .eq('id', tournament.id);
+
+          logger.info(`✅ Recovery: Tournament ${tournament.name} completed with prizes distributed`);
+        } else if (incompleteMatches && incompleteMatches.length > 0) {
+          // Check if matches are stuck (in_progress but no active engine running)
+          const { data: stuckMatches } = await supabase
+            .from('matches')
+            .select('id')
+            .eq('tournament_id', tournament.id)
+            .eq('status', 'in_progress');
+
+          // Re-trigger stuck matches via run-all endpoint
+          if (stuckMatches && stuckMatches.length > 0) {
+            // Reset stuck in_progress matches to pending
+            for (const m of stuckMatches) {
+              await supabase
+                .from('matches')
+                .update({ status: 'pending', home_score: 0, away_score: 0, home_wickets: 0, away_wickets: 0 })
+                .eq('id', m.id);
+            }
+
+            // Trigger pending matches
+            const port = process.env.PORT || 3000;
+            try {
+              await fetch(`http://localhost:${port}/api/tournament/${tournament.id}/run-all`, { method: 'POST' });
+              logger.info(`🔄 Recovery: Re-triggered ${stuckMatches.length} stuck matches for tournament ${tournament.name}`);
+            } catch (err) {
+              logger.error(`Recovery: Failed to re-trigger matches for ${tournament.id}:`, err.message);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      logger.error('Tournament recovery error:', error);
+    }
+  });
+
   // Create a recurring weekend tournament every Friday
   cron.schedule('0 0 * * 5', async () => {
     try {
