@@ -250,12 +250,14 @@ function initScheduler(app) {
 
           logger.info(`✅ Recovery: Tournament ${tournament.name} completed with prizes distributed`);
         } else if (incompleteMatches && incompleteMatches.length > 0) {
-          // Check if matches are stuck (in_progress but no active engine running)
+          // Check if matches are stuck (in_progress for more than 10 minutes = no active engine)
+          const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
           const { data: stuckMatches } = await supabase
             .from('matches')
             .select('id')
             .eq('tournament_id', tournament.id)
-            .eq('status', 'in_progress');
+            .eq('status', 'in_progress')
+            .lt('started_at', tenMinutesAgo);
 
           // Re-trigger stuck matches via run-all endpoint
           if (stuckMatches && stuckMatches.length > 0) {
