@@ -20,7 +20,7 @@ router.get('/', async (req, res) => {
     const { data, error } = await supabase
       .from('tournaments')
       .select('*, tournament_participants(count)')
-      .neq('status', 'completed')
+      .not('status', 'in', '(completed)')
       .order('starts_at');
 
     if (error) throw error;

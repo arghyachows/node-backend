@@ -30,8 +30,57 @@ function initScheduler(app) {
       }
 
       for (const tournament of tournaments) {
+        // Cancel if not enough participants
         if (tournament.current_participants < 2) {
-          logger.info(`⏭️ Tournament ${tournament.id} skipped — not enough participants (${tournament.current_participants})`);
+          logger.info(`❌ Cancelling tournament ${tournament.id} — not enough participants (${tournament.current_participants}/${tournament.max_participants})`);
+
+          try {
+            // Refund entry fees to all participants
+            if (tournament.entry_fee_coins > 0) {
+              const { data: participants } = await supabase
+                .from('tournament_participants')
+                .select('user_id')
+                .eq('tournament_id', tournament.id);
+
+              if (participants && participants.length > 0) {
+                for (const p of participants) {
+                  // Refund coins
+                  const { data: user } = await supabase
+                    .from('users')
+                    .select('coins')
+                    .eq('id', p.user_id)
+                    .single();
+
+                  if (user) {
+                    await supabase
+                      .from('users')
+                      .update({ coins: user.coins + tournament.entry_fee_coins })
+                      .eq('id', p.user_id);
+
+                    await supabase
+                      .from('transactions')
+                      .insert({
+                        user_id: p.user_id,
+                        type: 'tournament_reward',
+                        coins_amount: tournament.entry_fee_coins,
+                        description: `Refund: ${tournament.name} cancelled (not enough players)`,
+                      });
+                  }
+                }
+                logger.info(`💰 Refunded ${participants.length} participant(s) for cancelled tournament ${tournament.id}`);
+              }
+            }
+
+            // Mark tournament as cancelled
+            await supabase
+              .from('tournaments')
+              .update({ status: 'cancelled' })
+              .eq('id', tournament.id);
+
+            logger.info(`✅ Tournament ${tournament.id} cancelled successfully`);
+          } catch (cancelErr) {
+            logger.error(`Failed to cancel tournament ${tournament.id}:`, cancelErr);
+          }
           continue;
         }
 
