@@ -777,12 +777,22 @@ class TournamentMatchEngine extends MatchEngine {
         commentaryLog: this.commentaryLog,
       });
 
-      await setMatchState(this.matchId, this.serialize());
+      try {
+        await setMatchState(this.matchId, this.serialize());
+      } catch (redisErr) {
+        logger.warn(`Redis save failed for match ${this.matchId}: ${redisErr.message}`);
+      }
 
       this.timer = setTimeout(() => this.loop(), 800);
     } catch (error) {
       logger.error(`Tournament match ${this.matchId} error:`, error);
-      this.stop();
+      // Don't just stop — complete the match so tournament can proceed
+      try {
+        await this.onTournamentMatchComplete();
+      } catch (completeErr) {
+        logger.error(`Failed to complete match ${this.matchId} after error:`, completeErr);
+        this.stop();
+      }
     }
   }
 

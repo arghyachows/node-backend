@@ -124,11 +124,19 @@ class MatchEngine {
         commentaryLog: this.commentaryLog,
       });
 
-      // Save state to Redis
-      await setMatchState(this.matchId, this.serialize());
+      // Save state to Redis (non-fatal)
+      try {
+        await setMatchState(this.matchId, this.serialize());
+      } catch (redisErr) {
+        logger.warn(`Redis save failed for match ${this.matchId}: ${redisErr.message}`);
+      }
 
       // Publish to Redis pub/sub
-      await publishMatchUpdate(this.matchId, { result, state: this.getState() });
+      try {
+        await publishMatchUpdate(this.matchId, { result, state: this.getState() });
+      } catch (pubErr) {
+        logger.warn(`Redis publish failed for match ${this.matchId}: ${pubErr.message}`);
+      }
 
       // Schedule next ball
       this.timer = setTimeout(() => this.loop(), 1000);
