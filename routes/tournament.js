@@ -748,7 +748,14 @@ class TournamentMatchEngine extends MatchEngine {
 
   async loop() {
     if (!this.isRunning || this.matchComplete) {
-      await this.onTournamentMatchComplete();
+      try {
+        await this.onTournamentMatchComplete();
+      } catch (err) {
+        logger.error(`onTournamentMatchComplete failed for ${this.matchId}:`, err);
+        this.stop();
+        activeTournamentMatches.delete(this.matchId);
+        removeActiveMatch(this.matchId).catch(() => {});
+      }
       return;
     }
 
@@ -833,38 +840,41 @@ class TournamentMatchEngine extends MatchEngine {
       : (this.innings >= 2 ? this.overNumber + this.ballNumber / 6 : 0);
 
     // Update match in DB
-    try {
-      const updateData = {
-        status: 'completed',
-        home_score: homeScore,
-        home_wickets: homeWickets,
-        away_score: awayScore,
-        away_wickets: awayWickets,
-        home_overs: homeOvers || this.maxOvers,
-        away_overs: awayOvers || this.maxOvers,
-        winner_team_id: winnerTeamId,
-        completed_at: new Date().toISOString(),
-      };
+    const updateData = {
+      status: 'completed',
+      home_score: homeScore,
+      home_wickets: homeWickets,
+      away_score: awayScore,
+      away_wickets: awayWickets,
+      home_overs: homeOvers || this.maxOvers,
+      away_overs: awayOvers || this.maxOvers,
+      winner_team_id: winnerTeamId,
+      completed_at: new Date().toISOString(),
+    };
 
-      // Try saving commentary_log if column exists
-      try {
-        await this.supabaseClient
-          .from('matches')
-          .update({ ...updateData, commentary_log: this.commentaryLog })
-          .eq('id', this.matchId);
-      } catch (colErr) {
-        // Fallback: save without commentary_log if column doesn't exist yet
-        await this.supabaseClient
-          .from('matches')
-          .update(updateData)
-          .eq('id', this.matchId);
+    // Try with commentary_log first, then without
+    let { error: updateErr } = await this.supabaseClient
+      .from('matches')
+      .update({ ...updateData, commentary_log: this.commentaryLog })
+      .eq('id', this.matchId);
+
+    if (updateErr) {
+      logger.warn(`Match ${this.matchId} update with commentary failed: ${updateErr.message}, retrying without`);
+      const { error: fallbackErr } = await this.supabaseClient
+        .from('matches')
+        .update(updateData)
+        .eq('id', this.matchId);
+      if (fallbackErr) {
+        logger.error(`Match ${this.matchId} DB update failed: ${fallbackErr.message}`);
       }
-    } catch (err) {
-      logger.error(`Failed to update match ${this.matchId}:`, err);
     }
 
-    // Update tournament standings
-    await this.updateStandings(matchData, homeScore, awayScore, homeOvers, awayOvers, winnerTeamId);
+    // Update tournament standings (non-fatal)
+    try {
+      await this.updateStandings(matchData, homeScore, awayScore, homeOvers, awayOvers, winnerTeamId);
+    } catch (standErr) {
+      logger.error(`Failed to update standings for match ${this.matchId}:`, standErr);
+    }
 
     // Emit completion
     this.io.to(this.matchId).emit('matchComplete', {
@@ -874,14 +884,27 @@ class TournamentMatchEngine extends MatchEngine {
       commentaryLog: this.commentaryLog,
     });
 
-    await setMatchState(this.matchId, this.serialize());
+    // Save final state to Redis (non-fatal)
+    try {
+      await setMatchState(this.matchId, this.serialize());
+    } catch (redisErr) {
+      logger.warn(`Redis final save failed for match ${this.matchId}: ${redisErr.message}`);
+    }
 
     // Cleanup
     activeTournamentMatches.delete(this.matchId);
-    await removeActiveMatch(this.matchId);
+    try {
+      await removeActiveMatch(this.matchId);
+    } catch (cleanErr) {
+      logger.warn(`Cleanup failed for match ${this.matchId}: ${cleanErr.message}`);
+    }
 
-    // Check if tournament is complete
-    await this.checkTournamentComplete();
+    // Check if tournament is complete (non-fatal)
+    try {
+      await this.checkTournamentComplete();
+    } catch (tournErr) {
+      logger.error(`Tournament completion check failed for ${this.tournamentId}:`, tournErr);
+    }
   }
 
   async updateStandings(matchData, homeScore, awayScore, homeOvers, awayOvers, winnerTeamId) {

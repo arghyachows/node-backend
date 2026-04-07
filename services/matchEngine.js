@@ -185,6 +185,7 @@ class MatchEngine {
       score2: this.score2,
       wickets2: this.wickets2,
       target: this.target,
+      matchOvers: this.maxOvers,
       matchComplete: this.matchComplete,
       isSuperOver: this.isSuperOver,
       homeBatsFirst: this.homeBatsFirst,
