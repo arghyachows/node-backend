@@ -187,50 +187,56 @@ function initScheduler(app) {
             .order('points', { ascending: false })
             .order('net_run_rate', { ascending: false });
 
-          if (standings && standings.length > 0) {
-            const totalPrize = tournament.prize_coins || 0;
-            const prizeDistribution = [
-              { position: 1, share: 0.5 },
-              { position: 2, share: 0.3 },
-              { position: 3, share: 0.2 },
-            ];
+          // Distribute prizes (best-effort — tournament completes regardless)
+          try {
+            if (standings && standings.length > 0) {
+              const totalPrize = tournament.prize_coins || 0;
+              const prizeDistribution = [
+                { position: 1, share: 0.5 },
+                { position: 2, share: 0.3 },
+                { position: 3, share: 0.2 },
+              ];
 
-            for (const prize of prizeDistribution) {
-              const participant = standings[prize.position - 1];
-              if (!participant || totalPrize <= 0) continue;
+              for (const prize of prizeDistribution) {
+                const participant = standings[prize.position - 1];
+                if (!participant || totalPrize <= 0) continue;
 
-              const coins = Math.floor(totalPrize * prize.share);
-              if (coins <= 0) continue;
+                const coins = Math.floor(totalPrize * prize.share);
+                if (coins <= 0) continue;
 
-              const { data: user } = await supabase
-                .from('users')
-                .select('coins')
-                .eq('id', participant.user_id)
-                .single();
-              if (user) {
-                await supabase
+                const { data: user } = await supabase
                   .from('users')
-                  .update({ coins: user.coins + coins })
-                  .eq('id', participant.user_id);
+                  .select('coins')
+                  .eq('id', participant.user_id)
+                  .single();
+                if (user) {
+                  await supabase
+                    .from('users')
+                    .update({ coins: user.coins + coins })
+                    .eq('id', participant.user_id);
+                }
+
+                const { error: txnError } = await supabase
+                  .from('transactions')
+                  .insert({
+                    user_id: participant.user_id,
+                    type: 'tournament_reward',
+                    coins_amount: coins,
+                    description: `${tournament.name} - ${prize.position}${prize.position === 1 ? 'st' : prize.position === 2 ? 'nd' : 'rd'} place`,
+                  });
+                if (txnError) logger.warn(`Failed to record transaction for ${participant.user_id}: ${txnError.message}`);
+
+                await supabase
+                  .from('tournament_participants')
+                  .update({ position: prize.position })
+                  .eq('id', participant.id);
               }
-
-              const { error: txnError } = await supabase
-                .from('transactions')
-                .insert({
-                  user_id: participant.user_id,
-                  type: 'tournament_reward',
-                  coins_amount: coins,
-                  description: `${tournament.name} - ${prize.position}${prize.position === 1 ? 'st' : prize.position === 2 ? 'nd' : 'rd'} place`,
-                });
-              if (txnError) logger.warn(`Failed to record transaction for ${participant.user_id}: ${txnError.message}`);
-
-              await supabase
-                .from('tournament_participants')
-                .update({ position: prize.position })
-                .eq('id', participant.id);
             }
+          } catch (prizeError) {
+            logger.error(`Recovery: Prize distribution failed for tournament ${tournament.id}, completing anyway:`, prizeError);
           }
 
+          // ALWAYS mark tournament as completed
           await supabase
             .from('tournaments')
             .update({ status: 'completed', ends_at: new Date().toISOString() })

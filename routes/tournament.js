@@ -922,63 +922,67 @@ class TournamentMatchEngine extends MatchEngine {
         .order('points', { ascending: false })
         .order('net_run_rate', { ascending: false });
 
-      if (!standings || standings.length === 0) return;
+      // Distribute prizes (best-effort — tournament completes regardless)
+      try {
+        if (standings && standings.length > 0) {
+          const totalPrize = tournament.prize_coins || 0;
+          const prizeDistribution = [
+            { position: 1, share: 0.5 },
+            { position: 2, share: 0.3 },
+            { position: 3, share: 0.2 },
+          ];
 
-      // Distribute prizes (1st: 50%, 2nd: 30%, 3rd: 20%)
-      const totalPrize = tournament.prize_coins || 0;
-      const prizeDistribution = [
-        { position: 1, share: 0.5 },
-        { position: 2, share: 0.3 },
-        { position: 3, share: 0.2 },
-      ];
+          for (const prize of prizeDistribution) {
+            const participant = standings[prize.position - 1];
+            if (!participant) continue;
 
-      for (const prize of prizeDistribution) {
-        const participant = standings[prize.position - 1];
-        if (!participant) continue;
+            const coins = Math.floor(totalPrize * prize.share);
+            if (coins <= 0) continue;
 
-        const coins = Math.floor(totalPrize * prize.share);
-        if (coins <= 0) continue;
+            // Award coins
+            try {
+              const { error: rpcError } = await this.supabaseClient.rpc('increment_coins', {
+                row_id: participant.user_id,
+                amount: coins,
+              });
+              if (rpcError) throw rpcError;
+            } catch {
+              // Fallback if RPC doesn't exist
+              const { data: user } = await this.supabaseClient
+                .from('users')
+                .select('coins')
+                .eq('id', participant.user_id)
+                .single();
+              if (user) {
+                await this.supabaseClient
+                  .from('users')
+                  .update({ coins: user.coins + coins })
+                  .eq('id', participant.user_id);
+              }
+            }
 
-        // Award coins
-        try {
-          const { error: rpcError } = await this.supabaseClient.rpc('increment_coins', {
-            row_id: participant.user_id,
-            amount: coins,
-          });
-          if (rpcError) throw rpcError;
-        } catch {
-          // Fallback if RPC doesn't exist
-          const { data: user } = await this.supabaseClient
-            .from('users')
-            .select('coins')
-            .eq('id', participant.user_id)
-            .single();
-          if (user) {
+            // Record transaction (best-effort)
             await this.supabaseClient
-              .from('users')
-              .update({ coins: user.coins + coins })
-              .eq('id', participant.user_id);
+              .from('transactions')
+              .insert({
+                user_id: participant.user_id,
+                type: 'tournament_reward',
+                coins_amount: coins,
+                description: `${tournament.name} - ${prize.position}${prize.position === 1 ? 'st' : prize.position === 2 ? 'nd' : 'rd'} place`,
+              });
+
+            // Update position
+            await this.supabaseClient
+              .from('tournament_participants')
+              .update({ position: prize.position })
+              .eq('id', participant.id);
           }
         }
-
-        // Record transaction
-        await this.supabaseClient
-          .from('transactions')
-          .insert({
-            user_id: participant.user_id,
-            type: 'tournament_reward',
-            coins_amount: coins,
-            description: `${tournament.name} - ${prize.position}${prize.position === 1 ? 'st' : prize.position === 2 ? 'nd' : 'rd'} place`,
-          });
-
-        // Update position
-        await this.supabaseClient
-          .from('tournament_participants')
-          .update({ position: prize.position })
-          .eq('id', participant.id);
+      } catch (prizeError) {
+        logger.error(`Prize distribution failed for tournament ${this.tournamentId}, but completing anyway:`, prizeError);
       }
 
-      // Mark tournament as completed
+      // Mark tournament as completed — ALWAYS runs
       await this.supabaseClient
         .from('tournaments')
         .update({
