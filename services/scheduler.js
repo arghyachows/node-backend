@@ -135,32 +135,9 @@ function initScheduler(app) {
 
           logger.info(`🏆 Tournament ${tournament.id} started with ${matches.length} matches`);
 
-          // Auto-run matches directly (no HTTP fetch)
-          const { data: pendingMatches } = await supabase
-            .from('matches')
-            .select('id')
-            .eq('tournament_id', tournament.id)
-            .eq('status', 'pending');
-
-          if (pendingMatches && pendingMatches.length > 0) {
-            const port = process.env.PORT || 3000;
-            let delay = 0;
-            for (const m of pendingMatches) {
-              setTimeout(async () => {
-                try {
-                  const url = `http://localhost:${port}/api/tournament/${tournament.id}/run-match/${m.id}`;
-                  const resp = await fetch(url, { method: 'POST' });
-                  if (!resp.ok) {
-                    const body = await resp.text();
-                    logger.error(`Scheduler: match ${m.id} start failed: ${body}`);
-                  }
-                } catch (err) {
-                  logger.error(`Scheduler: failed to start match ${m.id}:`, err.message);
-                }
-              }, delay);
-              delay += 5000;
-            }
-          }
+          // Matches will be triggered sequentially by the match scheduler cron (every 10 min apart)
+          // First match will be picked up on the next tick of the sequential scheduler below
+          logger.info(`📋 Tournament ${tournament.id}: ${matches.length} matches generated, sequential scheduler will trigger them`);
         } catch (err) {
           logger.error(`Scheduler tournament ${tournament.id} error:`, err);
         }
@@ -170,26 +147,35 @@ function initScheduler(app) {
     }
   });
 
-  // Recovery: finalize in_progress tournaments where all matches are completed
-  // (handles server restarts that killed in-memory match engines)
+  // Sequential match scheduler: triggers one match at a time based on schedule
+  // Match N is scheduled at: tournament.starts_at + N * 10 minutes
+  // Also handles recovery for stuck/orphaned matches after server restarts
+  const MATCH_INTERVAL_MINUTES = 10;
+
   cron.schedule('* * * * *', async () => {
     try {
       const { data: liveTournaments } = await supabase
         .from('tournaments')
-        .select('id, name, prize_coins')
+        .select('id, name, prize_coins, starts_at')
         .eq('status', 'in_progress');
 
       if (!liveTournaments || liveTournaments.length === 0) return;
 
       for (const tournament of liveTournaments) {
-        const { data: incompleteMatches } = await supabase
+        // Get all matches ordered by created_at (determines match_number/schedule)
+        const { data: allMatches } = await supabase
           .from('matches')
-          .select('id')
+          .select('id, status, started_at, created_at')
           .eq('tournament_id', tournament.id)
-          .neq('status', 'completed');
+          .order('created_at');
 
-        if (incompleteMatches && incompleteMatches.length === 0) {
-          // All matches done — finalize tournament
+        if (!allMatches || allMatches.length === 0) continue;
+
+        const completedCount = allMatches.filter(m => m.status === 'completed').length;
+        const inProgressMatch = allMatches.find(m => m.status === 'in_progress');
+
+        // If ALL matches are completed, finalize the tournament
+        if (completedCount === allMatches.length) {
           logger.info(`🔄 Recovery: Finalizing tournament ${tournament.name} (${tournament.id})`);
 
           // Get standings
@@ -249,39 +235,57 @@ function initScheduler(app) {
             .eq('id', tournament.id);
 
           logger.info(`✅ Recovery: Tournament ${tournament.name} completed with prizes distributed`);
-        } else if (incompleteMatches && incompleteMatches.length > 0) {
-          // Check if matches are stuck (in_progress for more than 10 minutes = no active engine)
+          continue;
+        }
+
+        // If a match is currently in_progress, check if it's stuck (>10 min)
+        if (inProgressMatch) {
           const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-          const { data: stuckMatches } = await supabase
-            .from('matches')
-            .select('id')
-            .eq('tournament_id', tournament.id)
-            .eq('status', 'in_progress')
-            .lt('started_at', tenMinutesAgo);
+          if (inProgressMatch.started_at && inProgressMatch.started_at < tenMinutesAgo) {
+            // Stuck match — reset to pending so it gets re-triggered
+            logger.info(`🔄 Recovery: Resetting stuck match ${inProgressMatch.id} to pending`);
+            await supabase
+              .from('matches')
+              .update({ status: 'pending', home_score: 0, away_score: 0, home_wickets: 0, away_wickets: 0, home_overs: 0, away_overs: 0 })
+              .eq('id', inProgressMatch.id);
+            // Will be picked up on next tick
+          }
+          // Otherwise, a match is actively running — don't start another one
+          continue;
+        }
 
-          // Re-trigger stuck matches via run-all endpoint
-          if (stuckMatches && stuckMatches.length > 0) {
-            // Reset stuck in_progress matches to pending
-            for (const m of stuckMatches) {
-              await supabase
-                .from('matches')
-                .update({ status: 'pending', home_score: 0, away_score: 0, home_wickets: 0, away_wickets: 0 })
-                .eq('id', m.id);
-            }
+        // No match in_progress — find the NEXT pending match whose scheduled time has passed
+        const now = new Date();
+        const tournamentStart = new Date(tournament.starts_at);
 
-            // Trigger pending matches
-            const port = process.env.PORT || 3000;
-            try {
-              await fetch(`http://localhost:${port}/api/tournament/${tournament.id}/run-all`, { method: 'POST' });
-              logger.info(`🔄 Recovery: Re-triggered ${stuckMatches.length} stuck matches for tournament ${tournament.name}`);
-            } catch (err) {
-              logger.error(`Recovery: Failed to re-trigger matches for ${tournament.id}:`, err.message);
+        let nextMatchToRun = null;
+        for (let idx = 0; idx < allMatches.length; idx++) {
+          const m = allMatches[idx];
+          if (m.status !== 'pending') continue;
+
+          const scheduledAt = new Date(tournamentStart.getTime() + idx * MATCH_INTERVAL_MINUTES * 60 * 1000);
+          if (scheduledAt <= now) {
+            nextMatchToRun = m;
+            break;
+          }
+        }
+
+        if (nextMatchToRun) {
+          logger.info(`⏱️ Sequential scheduler: Starting match ${nextMatchToRun.id} for tournament ${tournament.name}`);
+          const port = process.env.PORT || 3000;
+          try {
+            const resp = await fetch(`http://localhost:${port}/api/tournament/${tournament.id}/run-match/${nextMatchToRun.id}`, { method: 'POST' });
+            if (!resp.ok) {
+              const body = await resp.text();
+              logger.error(`Sequential scheduler: match ${nextMatchToRun.id} start failed: ${body}`);
             }
+          } catch (err) {
+            logger.error(`Sequential scheduler: failed to start match ${nextMatchToRun.id}:`, err.message);
           }
         }
       }
     } catch (error) {
-      logger.error('Tournament recovery error:', error);
+      logger.error('Sequential match scheduler error:', error);
     }
   });
 

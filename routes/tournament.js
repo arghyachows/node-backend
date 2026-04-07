@@ -13,6 +13,15 @@ const supabase = createClient(
 // Active tournament match engines
 const activeTournamentMatches = new Map();
 
+// Match interval in minutes between sequential tournament matches
+const MATCH_INTERVAL_MINUTES = 10;
+
+// ─── Helper: Calculate scheduled time for match N ─────────────────
+function getMatchScheduledTime(tournamentStartsAt, matchIndex) {
+  const start = new Date(tournamentStartsAt);
+  return new Date(start.getTime() + matchIndex * MATCH_INTERVAL_MINUTES * 60 * 1000);
+}
+
 // ─── List tournaments ─────────────────────────────────────────────
 
 router.get('/', async (req, res) => {
@@ -20,8 +29,7 @@ router.get('/', async (req, res) => {
     const { data, error } = await supabase
       .from('tournaments')
       .select('*, tournament_participants(count)')
-      .not('status', 'in', '(completed)')
-      .order('starts_at');
+      .order('starts_at', { ascending: false });
 
     if (error) throw error;
     res.json({ tournaments: data || [] });
@@ -59,14 +67,25 @@ router.get('/:tournamentId', async (req, res) => {
 
     const { data: matches } = await supabase
       .from('matches')
-      .select('*')
+      .select('*, home_teams:home_team_id(team_name), away_teams:away_team_id(team_name)')
       .eq('tournament_id', tournamentId)
       .order('created_at');
+
+    // Enrich matches with scheduled times and match numbers
+    const enrichedMatches = (matches || []).map((m, idx) => ({
+      ...m,
+      match_number: idx + 1,
+      scheduled_at: tournament.starts_at
+        ? getMatchScheduledTime(tournament.starts_at, idx).toISOString()
+        : null,
+      home_team_name: m.home_teams?.team_name || 'Home',
+      away_team_name: m.away_teams?.team_name || 'Away',
+    }));
 
     res.json({
       tournament,
       participants: participants || [],
-      matches: matches || [],
+      matches: enrichedMatches,
     });
   } catch (error) {
     logger.error('Error fetching tournament:', error);
@@ -135,6 +154,24 @@ router.post('/:tournamentId/join', async (req, res) => {
 
     if (existing) {
       return res.status(400).json({ error: 'Already joined this tournament' });
+    }
+
+    // Check if user is already in an active (open or in_progress) tournament
+    const { data: activeTournaments } = await supabase
+      .from('tournament_participants')
+      .select('tournament_id, tournaments:tournament_id(id, name, status)')
+      .eq('user_id', userId);
+
+    const activeEntry = (activeTournaments || []).find(tp => {
+      const t = tp.tournaments;
+      return t && (t.status === 'open' || t.status === 'in_progress');
+    });
+
+    if (activeEntry) {
+      const activeName = activeEntry.tournaments?.name || 'another tournament';
+      return res.status(400).json({
+        error: `You are already in "${activeName}". You can only be in one tournament at a time.`,
+      });
     }
 
     // Deduct entry fee
@@ -355,29 +392,8 @@ router.post('/:tournamentId/check-start', async (req, res) => {
 
     logger.info(`🏆 Tournament ${tournamentId} started via check-start with ${matches.length} matches`);
 
-    // Auto-run matches
-    const port = process.env.PORT || 3000;
-    const { data: pendingMatches } = await supabase
-      .from('matches')
-      .select('id')
-      .eq('tournament_id', tournamentId)
-      .eq('status', 'pending');
-
-    if (pendingMatches) {
-      let delay = 1000;
-      for (const m of pendingMatches) {
-        setTimeout(async () => {
-          try {
-            await fetch(`http://localhost:${port}/api/tournament/${tournamentId}/run-match/${m.id}`, {
-              method: 'POST',
-            });
-          } catch (err) {
-            logger.error(`Check-start: failed to run match ${m.id}:`, err.message);
-          }
-        }, delay);
-        delay += 5000;
-      }
-    }
+    // Matches will be triggered sequentially by the scheduler (every 10 min)
+    // First match starts at tournament start time (which is now or past)
 
     res.json({ success: true, status: 'in_progress', matchCount: matches.length });
   } catch (error) {
@@ -527,6 +543,70 @@ router.post('/:tournamentId/run-match/:matchId', async (req, res) => {
   } catch (error) {
     logger.error('Error running tournament match:', error);
     res.status(500).json({ error: 'Failed to run match' });
+  }
+});
+
+// ─── Get active tournament match for a user ───────────────────────
+
+router.get('/user/:userId/active-match', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    // Find user's active tournament participation
+    const { data: participations } = await supabase
+      .from('tournament_participants')
+      .select('tournament_id, team_id, tournaments:tournament_id(id, name, status, starts_at, format)')
+      .eq('user_id', userId);
+
+    const activeTournament = (participations || []).find(tp => {
+      return tp.tournaments && tp.tournaments.status === 'in_progress';
+    });
+
+    if (!activeTournament) {
+      return res.json({ activeTournament: null, currentMatch: null, nextMatch: null });
+    }
+
+    const tournament = activeTournament.tournaments;
+    const tournamentId = tournament.id;
+
+    // Get all matches for this tournament with team names, ordered by created_at
+    const { data: allMatches } = await supabase
+      .from('matches')
+      .select('*, home_teams:home_team_id(team_name), away_teams:away_team_id(team_name)')
+      .eq('tournament_id', tournamentId)
+      .order('created_at');
+
+    const matches = (allMatches || []).map((m, idx) => ({
+      ...m,
+      match_number: idx + 1,
+      scheduled_at: tournament.starts_at
+        ? getMatchScheduledTime(tournament.starts_at, idx).toISOString()
+        : null,
+      home_team_name: m.home_teams?.team_name || 'Home',
+      away_team_name: m.away_teams?.team_name || 'Away',
+    }));
+
+    // Find current in_progress match
+    const currentMatch = matches.find(m => m.status === 'in_progress') || null;
+
+    // Find next pending match
+    const nextMatch = matches.find(m => m.status === 'pending') || null;
+
+    res.json({
+      activeTournament: {
+        id: tournament.id,
+        name: tournament.name,
+        status: tournament.status,
+        format: tournament.format,
+        starts_at: tournament.starts_at,
+      },
+      currentMatch,
+      nextMatch,
+      matches,
+    });
+  } catch (error) {
+    logger.error('Error fetching active match:', error);
+    res.status(500).json({ error: 'Failed to fetch active match' });
   }
 });
 
