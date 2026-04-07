@@ -940,10 +940,13 @@ class TournamentMatchEngine extends MatchEngine {
         if (coins <= 0) continue;
 
         // Award coins
-        await this.supabaseClient.rpc('increment_coins', {
-          row_id: participant.user_id,
-          amount: coins,
-        }).catch(async () => {
+        try {
+          const { error: rpcError } = await this.supabaseClient.rpc('increment_coins', {
+            row_id: participant.user_id,
+            amount: coins,
+          });
+          if (rpcError) throw rpcError;
+        } catch {
           // Fallback if RPC doesn't exist
           const { data: user } = await this.supabaseClient
             .from('users')
@@ -956,7 +959,7 @@ class TournamentMatchEngine extends MatchEngine {
               .update({ coins: user.coins + coins })
               .eq('id', participant.user_id);
           }
-        });
+        }
 
         // Record transaction
         await this.supabaseClient

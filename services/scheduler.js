@@ -214,14 +214,15 @@ function initScheduler(app) {
                   .eq('id', participant.user_id);
               }
 
-              await supabase
+              const { error: txnError } = await supabase
                 .from('transactions')
                 .insert({
                   user_id: participant.user_id,
                   type: 'tournament_reward',
                   coins_amount: coins,
                   description: `${tournament.name} - ${prize.position}${prize.position === 1 ? 'st' : prize.position === 2 ? 'nd' : 'rd'} place`,
-                }).catch(() => {});
+                });
+              if (txnError) logger.warn(`Failed to record transaction for ${participant.user_id}: ${txnError.message}`);
 
               await supabase
                 .from('tournament_participants')
