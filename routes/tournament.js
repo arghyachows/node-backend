@@ -49,7 +49,7 @@ router.get('/:tournamentId', async (req, res) => {
 
     const { data: participants, error: pError } = await supabase
       .from('tournament_participants')
-      .select('*, users:user_id(username, display_name), teams:team_id(name)')
+      .select('*, users:user_id(username, display_name), teams:team_id(team_name)')
       .eq('tournament_id', tournamentId)
       .order('points', { ascending: false });
 
@@ -82,7 +82,7 @@ router.get('/:tournamentId/standings', async (req, res) => {
 
     const { data, error } = await supabase
       .from('tournament_participants')
-      .select('*, users:user_id(username, display_name), teams:team_id(name)')
+      .select('*, users:user_id(username, display_name), teams:team_id(team_name)')
       .eq('tournament_id', tournamentId)
       .order('points', { ascending: false })
       .order('net_run_rate', { ascending: false });
@@ -404,7 +404,7 @@ router.post('/:tournamentId/generate-matches', async (req, res) => {
 
     const { data: participants } = await supabase
       .from('tournament_participants')
-      .select('*, teams(name)')
+      .select('*, teams(team_name)')
       .eq('tournament_id', tournamentId);
 
     if (!participants || participants.length < 2) {
@@ -486,8 +486,8 @@ router.post('/:tournamentId/run-match/:matchId', async (req, res) => {
     const maxOvers = maxOversMap[match.format] || 20;
 
     // Fetch team names
-    const { data: homeTeam } = await supabase.from('teams').select('name').eq('id', match.home_team_id).single();
-    const { data: awayTeam } = await supabase.from('teams').select('name').eq('id', match.away_team_id).single();
+    const { data: homeTeam } = await supabase.from('teams').select('team_name').eq('id', match.home_team_id).single();
+    const { data: awayTeam } = await supabase.from('teams').select('team_name').eq('id', match.away_team_id).single();
 
     const config = {
       homeXI,
@@ -496,8 +496,8 @@ router.post('/:tournamentId/run-match/:matchId', async (req, res) => {
       awayChemistry: 80,
       maxOvers,
       pitchCondition: 'balanced',
-      homeTeamName: homeTeam?.name || 'Home',
-      awayTeamName: awayTeam?.name || 'Away',
+      homeTeamName: homeTeam?.team_name || 'Home',
+      awayTeamName: awayTeam?.team_name || 'Away',
       homeBatsFirst: Math.random() > 0.5,
       useAICommentary: true,
     };
