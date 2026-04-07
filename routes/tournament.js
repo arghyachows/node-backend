@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { createClient } = require('@supabase/supabase-js');
 const MatchEngine = require('../services/matchEngine');
-const { setMatchState, addActiveMatch, removeActiveMatch } = require('../services/redis');
+const { getMatchState, setMatchState, addActiveMatch, removeActiveMatch } = require('../services/redis');
 const logger = require('../utils/logger');
 
 const supabase = createClient(
@@ -69,7 +69,8 @@ router.get('/:tournamentId', async (req, res) => {
       .from('matches')
       .select('*, home_teams:home_team_id(team_name), away_teams:away_team_id(team_name)')
       .eq('tournament_id', tournamentId)
-      .order('created_at');
+      .order('created_at')
+      .order('id');
 
     // Enrich matches with scheduled times and match numbers
     const enrichedMatches = (matches || []).map((m, idx) => ({
@@ -574,7 +575,8 @@ router.get('/user/:userId/active-match', async (req, res) => {
       .from('matches')
       .select('*, home_teams:home_team_id(team_name), away_teams:away_team_id(team_name)')
       .eq('tournament_id', tournamentId)
-      .order('created_at');
+      .order('created_at')
+      .order('id');
 
     const matches = (allMatches || []).map((m, idx) => ({
       ...m,
@@ -592,6 +594,43 @@ router.get('/user/:userId/active-match', async (req, res) => {
     // Find next pending match
     const nextMatch = matches.find(m => m.status === 'pending') || null;
 
+    // If there's a live match, overlay live scores from Redis
+    let liveCurrentMatch = currentMatch;
+    if (currentMatch) {
+      try {
+        const liveState = await getMatchState(currentMatch.id);
+        if (liveState) {
+          const hbf = liveState.homeBatsFirst;
+          const homeScore = hbf ? liveState.score1 : liveState.score2;
+          const awayScore = hbf ? liveState.score2 : liveState.score1;
+          const homeWickets = hbf ? liveState.wickets1 : liveState.wickets2;
+          const awayWickets = hbf ? liveState.wickets2 : liveState.wickets1;
+          const innings = liveState.innings || 1;
+          const overNumber = liveState.overNumber || 0;
+          const ballNumber = liveState.ballNumber || 0;
+          const homeOvers = hbf
+            ? (innings === 1 ? `${overNumber}.${ballNumber}` : (currentMatch.home_overs || '0.0').toString())
+            : (innings === 2 ? `${overNumber}.${ballNumber}` : (currentMatch.home_overs || '0.0').toString());
+          const awayOvers = !hbf
+            ? (innings === 1 ? `${overNumber}.${ballNumber}` : (currentMatch.away_overs || '0.0').toString())
+            : (innings === 2 ? `${overNumber}.${ballNumber}` : (currentMatch.away_overs || '0.0').toString());
+
+          liveCurrentMatch = {
+            ...currentMatch,
+            home_score: homeScore,
+            away_score: awayScore,
+            home_wickets: homeWickets,
+            away_wickets: awayWickets,
+            home_overs: homeOvers,
+            away_overs: awayOvers,
+            live_innings: innings,
+          };
+        }
+      } catch (redisErr) {
+        logger.warn(`Failed to fetch live state for match ${currentMatch.id}:`, redisErr.message);
+      }
+    }
+
     res.json({
       activeTournament: {
         id: tournament.id,
@@ -600,7 +639,7 @@ router.get('/user/:userId/active-match', async (req, res) => {
         format: tournament.format,
         starts_at: tournament.starts_at,
       },
-      currentMatch,
+      currentMatch: liveCurrentMatch,
       nextMatch,
       matches,
     });

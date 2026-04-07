@@ -181,6 +181,7 @@ class MatchEngine {
       target: this.target,
       matchComplete: this.matchComplete,
       isSuperOver: this.isSuperOver,
+      homeBatsFirst: this.homeBatsFirst,
       batsmanStats: this.batsmanStats,
       bowlerStats: this.bowlerStats,
       currentBatsman: this.currentBatsman?.name,

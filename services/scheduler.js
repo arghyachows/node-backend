@@ -167,7 +167,8 @@ function initScheduler(app) {
           .from('matches')
           .select('id, status, started_at, created_at')
           .eq('tournament_id', tournament.id)
-          .order('created_at');
+          .order('created_at')
+          .order('id');
 
         if (!allMatches || allMatches.length === 0) continue;
 
