@@ -88,12 +88,19 @@ function initScheduler(app) {
 
         try {
           // Generate matches
-          const { data: participants } = await supabase
+          const { data: participants, error: pError } = await supabase
             .from('tournament_participants')
-            .select('*, teams(name)')
+            .select('user_id, team_id')
             .eq('tournament_id', tournament.id);
 
-          if (!participants || participants.length < 2) continue;
+          if (pError) {
+            logger.error(`Scheduler: failed to fetch participants for ${tournament.id}: ${pError.message}`);
+          }
+
+          if (!participants || participants.length < 2) {
+            logger.error(`Scheduler: tournament ${tournament.id} has current_participants=${tournament.current_participants} but query returned ${participants?.length ?? 0} rows`);
+            continue;
+          }
 
           // Generate round-robin fixtures
           const matches = [];
@@ -116,7 +123,7 @@ function initScheduler(app) {
             .insert(matches);
 
           if (insertError) {
-            logger.error(`Failed to generate matches for tournament ${tournament.id}:`, insertError);
+            logger.error(`Failed to generate matches for tournament ${tournament.id}: ${insertError.message} | ${JSON.stringify(insertError)}`);
             continue;
           }
 

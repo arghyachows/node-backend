@@ -47,11 +47,15 @@ router.get('/:tournamentId', async (req, res) => {
       return res.status(404).json({ error: 'Tournament not found' });
     }
 
-    const { data: participants } = await supabase
+    const { data: participants, error: pError } = await supabase
       .from('tournament_participants')
-      .select('*, users(username, display_name), teams(name)')
+      .select('*, users:user_id(username, display_name), teams:team_id(name)')
       .eq('tournament_id', tournamentId)
       .order('points', { ascending: false });
+
+    if (pError) {
+      logger.error(`Failed to fetch participants for ${tournamentId}:`, pError.message);
+    }
 
     const { data: matches } = await supabase
       .from('matches')
@@ -78,7 +82,7 @@ router.get('/:tournamentId/standings', async (req, res) => {
 
     const { data, error } = await supabase
       .from('tournament_participants')
-      .select('*, users(username, display_name), teams(name)')
+      .select('*, users:user_id(username, display_name), teams:team_id(name)')
       .eq('tournament_id', tournamentId)
       .order('points', { ascending: false })
       .order('net_run_rate', { ascending: false });
@@ -304,12 +308,17 @@ router.post('/:tournamentId/check-start', async (req, res) => {
     }
 
     // Enough participants — generate matches and start
-    const { data: participants } = await supabase
+    const { data: participants, error: pError } = await supabase
       .from('tournament_participants')
-      .select('*, teams(name)')
+      .select('user_id, team_id')
       .eq('tournament_id', tournamentId);
 
+    if (pError) {
+      logger.error(`check-start: failed to fetch participants for ${tournamentId}:`, pError.message);
+    }
+
     if (!participants || participants.length < 2) {
+      logger.error(`check-start: tournament ${tournamentId} has current_participants=${tournament.current_participants} but query returned ${participants?.length ?? 0} rows`);
       return res.status(400).json({ error: 'No participants found' });
     }
 
@@ -334,8 +343,8 @@ router.post('/:tournamentId/check-start', async (req, res) => {
       .insert(matches);
 
     if (insertError) {
-      logger.error('Failed to generate matches:', insertError);
-      return res.status(500).json({ error: 'Failed to generate matches' });
+      logger.error(`check-start: Failed to generate matches: ${insertError.message} | ${JSON.stringify(insertError)}`);
+      return res.status(500).json({ error: `Failed to generate matches: ${insertError.message}` });
     }
 
     // Update tournament status
