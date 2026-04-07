@@ -299,8 +299,8 @@ class MatchEngine {
         eventType = 'dot_ball';
     }
 
-    // Generate commentary (AI for important events only)
-    const useAI = this.useAICommentary && ['wicket', 'four', 'six', 'no_ball'].includes(eventType);
+    // Generate commentary (template engine is instant — use for all events)
+    const useAI = this.useAICommentary;
     
     if (useAI) {
       try {
@@ -569,39 +569,127 @@ class MatchEngine {
 
   getFallbackCommentary(eventType, batsmanName, bowlerName, wicketType, fielderName, isFreeHit) {
     let commentary;
+    const f = fielderName || 'the fielder';
     
     switch (eventType) {
       case 'dot_ball':
         commentary = pick([
           `${bowlerName} keeps it tight, dot ball.`,
           `Good length from ${bowlerName}, ${batsmanName} defends.`,
+          `${bowlerName} on the mark, ${batsmanName} can't find a gap.`,
+          `Tight line from ${bowlerName}. No run.`,
+          `${batsmanName} pushes at it but can't beat the field.`,
+          `${bowlerName} darts it in, ${batsmanName} blocks.`,
+          `Nothing doing. ${bowlerName} keeps it outside off.`,
         ]);
         break;
       case 'single':
-        commentary = `${batsmanName} pushes for a quick single.`;
+        commentary = pick([
+          `${batsmanName} pushes for a quick single.`,
+          `${batsmanName} works it to the on side, easy single.`,
+          `${batsmanName} dabs it and rotates the strike.`,
+          `Single taken. ${batsmanName} keeps the scoreboard ticking.`,
+          `${batsmanName} flicks off the pads for one.`,
+        ]);
         break;
       case 'double':
-        commentary = `${batsmanName} drives through the gap for two.`;
+        commentary = pick([
+          `${batsmanName} drives through the gap for two.`,
+          `Placed well by ${batsmanName}! Two runs.`,
+          `${batsmanName} punches it through cover — two!`,
+          `${batsmanName} works it into the deep — hustled two!`,
+        ]);
         break;
       case 'triple':
-        commentary = `${batsmanName} finds the gap, they run three!`;
+        commentary = pick([
+          `${batsmanName} finds the gap, they run three!`,
+          `Three runs! Excellent running between the wickets!`,
+          `${batsmanName} drives and they take three!`,
+        ]);
         break;
       case 'four':
-        commentary = `FOUR! ${batsmanName} drives beautifully!`;
+        commentary = pick([
+          `FOUR! ${batsmanName} drives beautifully!`,
+          `FOUR! ${batsmanName} times it to perfection!`,
+          `FOUR! ${batsmanName} finds the gap, races to the boundary!`,
+          `FOUR! Cracking shot from ${batsmanName}!`,
+          `FOUR! ${batsmanName} threads it through the off side!`,
+          `FOUR! Short from ${bowlerName} and ${batsmanName} pulls it away!`,
+        ]);
         break;
       case 'six':
-        commentary = `SIX! ${batsmanName} launches it into the stands!`;
+        commentary = pick([
+          `SIX! ${batsmanName} launches it into the stands!`,
+          `SIX! Massive hit from ${batsmanName}!`,
+          `SIX! ${batsmanName} clears the rope with ease!`,
+          `SIX! ${batsmanName} steps down and deposits it into the crowd!`,
+          `SIX! ${batsmanName} picks the length and smashes it downtown!`,
+        ]);
         break;
       case 'wicket':
-        commentary = isFreeHit 
-          ? `${batsmanName} misses but it's a FREE HIT! No wicket!`
-          : `OUT! ${bowlerName} strikes! ${batsmanName} has to walk back.`;
+        if (isFreeHit) {
+          commentary = pick([
+            `${batsmanName} misses but it's a FREE HIT! No wicket!`,
+            `That would have been out! But free hit saves ${batsmanName}!`,
+          ]);
+        } else {
+          switch (wicketType) {
+            case 'bowled':
+              commentary = pick([
+                `BOWLED! ${bowlerName} knocks back the stumps! ${batsmanName} is stunned!`,
+                `TIMBER! The stump is cartwheeling! ${batsmanName} has to go!`,
+                `Clean bowled! Brilliant from ${bowlerName}!`,
+              ]);
+              break;
+            case 'caught':
+              commentary = pick([
+                `CAUGHT! ${f} takes a sharp catch! ${batsmanName} is gone!`,
+                `OUT! ${batsmanName} holes out to ${f}!`,
+                `CAUGHT! Taken cleanly by ${f}! ${bowlerName} strikes!`,
+              ]);
+              break;
+            case 'lbw':
+              commentary = pick([
+                `LBW! Trapped in front! ${batsmanName} is plumb!`,
+                `OUT! LBW! Dead straight from ${bowlerName}!`,
+              ]);
+              break;
+            case 'run_out':
+              commentary = pick([
+                `RUN OUT! ${batsmanName} is short of the crease!`,
+                `RUN OUT! Direct hit! ${batsmanName} has to go!`,
+              ]);
+              break;
+            case 'stumped':
+              commentary = pick([
+                `STUMPED! ${batsmanName} charges down and misses!`,
+                `STUMPED! Lightning quick work behind the stumps!`,
+              ]);
+              break;
+            case 'caught_behind':
+              commentary = pick([
+                `CAUGHT BEHIND! Thin edge and ${f} takes it!`,
+                `OUT! Feather edge! ${batsmanName} is dismissed!`,
+              ]);
+              break;
+            default:
+              commentary = `OUT! ${bowlerName} strikes! ${batsmanName} has to walk back.`;
+          }
+        }
         break;
       case 'wide':
-        commentary = `Wide ball from ${bowlerName}. Extra run.`;
+        commentary = pick([
+          `Wide ball from ${bowlerName}. Extra run.`,
+          `Too wide! ${bowlerName} strays down the leg side.`,
+          `Wide called. ${bowlerName} needs to tighten up.`,
+        ]);
         break;
       case 'no_ball':
-        commentary = `NO BALL! ${bowlerName} oversteps! FREE HIT next!`;
+        commentary = pick([
+          `NO BALL! ${bowlerName} oversteps! FREE HIT next!`,
+          `NO BALL! ${bowlerName} has overstepped! Free hit coming!`,
+          `That's a no ball! Free hit for ${batsmanName}!`,
+        ]);
         break;
       default:
         commentary = 'Dot ball.';
