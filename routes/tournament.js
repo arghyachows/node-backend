@@ -1002,45 +1002,100 @@ class TournamentMatchEngine extends MatchEngine {
 
 async function loadTournamentTeamXI(teamId) {
   try {
-    const { data, error } = await supabase
+    // First, find the active squad for this team
+    const { data: team, error: teamError } = await supabase
       .from('teams')
-      .select('*, squads(*, squad_players(*, user_cards(*, player_cards(*))))')
+      .select('id, squads(id, is_active)')
       .eq('id', teamId)
       .single();
 
-    if (error || !data) {
-      logger.error(`Failed to fetch team ${teamId}:`, error);
+    if (teamError || !team) {
+      logger.error(`Failed to fetch team ${teamId}:`, teamError);
       return null;
     }
 
-    const squads = data.squads || [];
+    const squads = team.squads || [];
     const squad = squads.find(s => s.is_active) || squads[0];
-
     if (!squad) {
       logger.error(`No squad found for team ${teamId}`);
       return null;
     }
 
-    const players = (squad.squad_players || [])
-      .sort((a, b) => (a.position || 99) - (b.position || 99));
+    // 1. Try lineup_players (user's set lineup from squad builder)
+    const { data: lineupData } = await supabase
+      .from('lineup_players')
+      .select('*, user_cards(*, player_cards(*))')
+      .eq('squad_id', squad.id)
+      .order('batting_order');
 
-    if (players.length === 0) {
-      logger.error(`No playing XI for team ${teamId}`);
-      return null;
+    if (lineupData && lineupData.length > 0) {
+      const xi = lineupData.slice(0, 11).map(lp => {
+        const uc = lp.user_cards || lp.user_card;
+        const pc = uc?.player_cards || uc?.player_card;
+        return {
+          userCardId: lp.user_card_id || uc?.id,
+          name: pc?.player_name || 'Player',
+          role: pc?.role || 'batsman',
+          batting: pc?.batting || 50,
+          bowling: pc?.bowling || 50,
+          fielding: pc?.fielding || 50,
+        };
+      });
+      logger.info(`Loaded ${xi.length} players from lineup_players for team ${teamId}`);
+      return xi;
     }
 
-    return players.slice(0, 11).map(sp => {
-      const uc = sp.user_cards || sp.user_card;
-      const pc = uc?.player_cards || uc?.player_card;
-      return {
-        userCardId: sp.user_card_id || uc?.id,
-        name: pc?.player_name || 'Player',
-        role: pc?.role || 'batsman',
-        batting: pc?.batting || 50,
-        bowling: pc?.bowling || 50,
-        fielding: pc?.fielding || 50,
-      };
-    });
+    // 2. Fallback: squad_players with is_playing_xi
+    const { data: squadData } = await supabase
+      .from('squad_players')
+      .select('*, user_cards(*, player_cards(*))')
+      .eq('squad_id', squad.id)
+      .eq('is_playing_xi', true)
+      .order('batting_order');
+
+    if (squadData && squadData.length > 0) {
+      const xi = squadData.slice(0, 11).map(sp => {
+        const uc = sp.user_cards || sp.user_card;
+        const pc = uc?.player_cards || uc?.player_card;
+        return {
+          userCardId: sp.user_card_id || uc?.id,
+          name: pc?.player_name || 'Player',
+          role: pc?.role || 'batsman',
+          batting: pc?.batting || 50,
+          bowling: pc?.bowling || 50,
+          fielding: pc?.fielding || 50,
+        };
+      });
+      logger.info(`Loaded ${xi.length} players from squad_players (is_playing_xi) for team ${teamId}`);
+      return xi;
+    }
+
+    // 3. Final fallback: all squad_players sorted by position
+    const { data: allPlayers } = await supabase
+      .from('squad_players')
+      .select('*, user_cards(*, player_cards(*))')
+      .eq('squad_id', squad.id)
+      .order('position');
+
+    if (allPlayers && allPlayers.length > 0) {
+      const xi = allPlayers.slice(0, 11).map(sp => {
+        const uc = sp.user_cards || sp.user_card;
+        const pc = uc?.player_cards || uc?.player_card;
+        return {
+          userCardId: sp.user_card_id || uc?.id,
+          name: pc?.player_name || 'Player',
+          role: pc?.role || 'batsman',
+          batting: pc?.batting || 50,
+          bowling: pc?.bowling || 50,
+          fielding: pc?.fielding || 50,
+        };
+      });
+      logger.info(`Loaded ${xi.length} players from squad_players (all) for team ${teamId}`);
+      return xi;
+    }
+
+    logger.error(`No players found for team ${teamId}`);
+    return null;
   } catch (error) {
     logger.error(`Error loading team ${teamId}:`, error);
     return null;
