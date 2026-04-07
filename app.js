@@ -7,6 +7,7 @@ const rateLimit = require('express-rate-limit');
 const initSocket = require('./socket');
 const matchRoutes = require('./routes/match');
 const multiplayerRoutes = require('./routes/multiplayer');
+const tournamentRoutes = require('./routes/tournament');
 const { initScheduler } = require('./services/scheduler');
 const logger = require('./utils/logger');
 
@@ -77,6 +78,7 @@ app.use((req, res, next) => {
 // Routes
 app.use('/api/match', matchRoutes);
 app.use('/api/multiplayer', multiplayerRoutes);
+app.use('/api/tournament', tournamentRoutes);
 
 // Error handling
 app.use((err, req, res, next) => {
@@ -85,7 +87,7 @@ app.use((err, req, res, next) => {
 });
 
 // Initialize scheduler
-initScheduler();
+initScheduler(app);
 
 // Start server
 const PORT = parseInt(process.env.PORT || '3000', 10);
