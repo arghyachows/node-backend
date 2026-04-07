@@ -83,9 +83,19 @@ router.get('/:tournamentId', async (req, res) => {
       away_team_name: m.away_teams?.team_name || 'Away',
     }));
 
+    // Enrich participants with coins_won based on position and prize pool
+    const totalPrize = tournament.prize_coins || 0;
+    const prizeShares = { 1: 0.5, 2: 0.3, 3: 0.2 };
+    const enrichedParticipants = (participants || []).map(p => ({
+      ...p,
+      coins_won: p.position && prizeShares[p.position] && totalPrize > 0
+        ? Math.floor(totalPrize * prizeShares[p.position])
+        : 0,
+    }));
+
     res.json({
       tournament,
-      participants: participants || [],
+      participants: enrichedParticipants,
       matches: enrichedMatches,
     });
   } catch (error) {
