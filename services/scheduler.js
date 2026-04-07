@@ -102,8 +102,10 @@ function initScheduler(app) {
               matches.push({
                 home_team_id: participants[i].team_id,
                 away_team_id: participants[j].team_id,
-                match_format: tournament.format,
-                status: 'scheduled',
+                home_user_id: participants[i].user_id,
+                away_user_id: participants[j].user_id,
+                format: tournament.format,
+                status: 'pending',
                 tournament_id: tournament.id,
               });
             }
@@ -126,27 +128,30 @@ function initScheduler(app) {
 
           logger.info(`🏆 Tournament ${tournament.id} started with ${matches.length} matches`);
 
-          // Auto-run matches via internal API call
-          const port = process.env.PORT || 3000;
-          const { data: scheduledMatches } = await supabase
+          // Auto-run matches directly (no HTTP fetch)
+          const { data: pendingMatches } = await supabase
             .from('matches')
             .select('id')
             .eq('tournament_id', tournament.id)
-            .eq('status', 'scheduled');
+            .eq('status', 'pending');
 
-          if (scheduledMatches) {
+          if (pendingMatches && pendingMatches.length > 0) {
+            const port = process.env.PORT || 3000;
             let delay = 0;
-            for (const m of scheduledMatches) {
+            for (const m of pendingMatches) {
               setTimeout(async () => {
                 try {
-                  await fetch(`http://localhost:${port}/api/tournament/${tournament.id}/run-match/${m.id}`, {
-                    method: 'POST',
-                  });
+                  const url = `http://localhost:${port}/api/tournament/${tournament.id}/run-match/${m.id}`;
+                  const resp = await fetch(url, { method: 'POST' });
+                  if (!resp.ok) {
+                    const body = await resp.text();
+                    logger.error(`Scheduler: match ${m.id} start failed: ${body}`);
+                  }
                 } catch (err) {
                   logger.error(`Scheduler: failed to start match ${m.id}:`, err.message);
                 }
               }, delay);
-              delay += 5000; // 5 second gap to avoid overloading
+              delay += 5000;
             }
           }
         } catch (err) {

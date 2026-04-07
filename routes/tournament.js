@@ -232,6 +232,151 @@ router.post('/create', async (req, res) => {
   }
 });
 
+// ─── Check and start a tournament if ready ────────────────────────
+
+router.post('/:tournamentId/check-start', async (req, res) => {
+  try {
+    const { tournamentId } = req.params;
+
+    const { data: tournament, error } = await supabase
+      .from('tournaments')
+      .select('*')
+      .eq('id', tournamentId)
+      .single();
+
+    if (error || !tournament) {
+      return res.status(404).json({ error: 'Tournament not found' });
+    }
+
+    if (tournament.status !== 'open') {
+      return res.json({ success: true, status: tournament.status, message: 'Tournament already processed' });
+    }
+
+    const now = new Date();
+    const startsAt = new Date(tournament.starts_at);
+
+    if (startsAt > now) {
+      return res.json({ success: true, status: 'open', message: 'Tournament has not reached start time yet' });
+    }
+
+    // Start time has passed — check participants
+    if (tournament.current_participants < 2) {
+      // Cancel and refund
+      if (tournament.entry_fee_coins > 0) {
+        const { data: participants } = await supabase
+          .from('tournament_participants')
+          .select('user_id')
+          .eq('tournament_id', tournamentId);
+
+        if (participants) {
+          for (const p of participants) {
+            const { data: user } = await supabase
+              .from('users')
+              .select('coins')
+              .eq('id', p.user_id)
+              .single();
+
+            if (user) {
+              await supabase
+                .from('users')
+                .update({ coins: user.coins + tournament.entry_fee_coins })
+                .eq('id', p.user_id);
+
+              await supabase
+                .from('transactions')
+                .insert({
+                  user_id: p.user_id,
+                  type: 'tournament_reward',
+                  coins_amount: tournament.entry_fee_coins,
+                  description: `Refund: ${tournament.name} cancelled (not enough players)`,
+                });
+            }
+          }
+        }
+      }
+
+      await supabase
+        .from('tournaments')
+        .update({ status: 'cancelled' })
+        .eq('id', tournamentId);
+
+      return res.json({ success: true, status: 'cancelled', message: 'Tournament cancelled — not enough players' });
+    }
+
+    // Enough participants — generate matches and start
+    const { data: participants } = await supabase
+      .from('tournament_participants')
+      .select('*, teams(name)')
+      .eq('tournament_id', tournamentId);
+
+    if (!participants || participants.length < 2) {
+      return res.status(400).json({ error: 'No participants found' });
+    }
+
+    // Generate round-robin fixtures
+    const matches = [];
+    for (let i = 0; i < participants.length; i++) {
+      for (let j = i + 1; j < participants.length; j++) {
+        matches.push({
+          home_team_id: participants[i].team_id,
+          away_team_id: participants[j].team_id,
+          home_user_id: participants[i].user_id,
+          away_user_id: participants[j].user_id,
+          format: tournament.format,
+          status: 'pending',
+          tournament_id: tournamentId,
+        });
+      }
+    }
+
+    const { error: insertError } = await supabase
+      .from('matches')
+      .insert(matches);
+
+    if (insertError) {
+      logger.error('Failed to generate matches:', insertError);
+      return res.status(500).json({ error: 'Failed to generate matches' });
+    }
+
+    // Update tournament status
+    await supabase
+      .from('tournaments')
+      .update({ status: 'in_progress' })
+      .eq('id', tournamentId);
+
+    logger.info(`🏆 Tournament ${tournamentId} started via check-start with ${matches.length} matches`);
+
+    // Auto-run matches
+    const port = process.env.PORT || 3000;
+    const { data: pendingMatches } = await supabase
+      .from('matches')
+      .select('id')
+      .eq('tournament_id', tournamentId)
+      .eq('status', 'pending');
+
+    if (pendingMatches) {
+      let delay = 1000;
+      for (const m of pendingMatches) {
+        setTimeout(async () => {
+          try {
+            await fetch(`http://localhost:${port}/api/tournament/${tournamentId}/run-match/${m.id}`, {
+              method: 'POST',
+            });
+          } catch (err) {
+            logger.error(`Check-start: failed to run match ${m.id}:`, err.message);
+          }
+        }, delay);
+        delay += 5000;
+      }
+    }
+
+    res.json({ success: true, status: 'in_progress', matchCount: matches.length });
+  } catch (error) {
+    logger.error('Error in check-start:', error);
+    res.status(500).json({ error: 'Failed to check/start tournament' });
+  }
+});
+
 // ─── Generate round-robin matches ─────────────────────────────────
 
 router.post('/:tournamentId/generate-matches', async (req, res) => {
@@ -264,8 +409,10 @@ router.post('/:tournamentId/generate-matches', async (req, res) => {
         matches.push({
           home_team_id: participants[i].team_id,
           away_team_id: participants[j].team_id,
-          match_format: tournament.format,
-          status: 'scheduled',
+          home_user_id: participants[i].user_id,
+          away_user_id: participants[j].user_id,
+          format: tournament.format,
+          status: 'pending',
           tournament_id: tournamentId,
         });
       }
@@ -327,7 +474,7 @@ router.post('/:tournamentId/run-match/:matchId', async (req, res) => {
     }
 
     const maxOversMap = { t20: 20, odi: 50, t10: 10, test: 90 };
-    const maxOvers = maxOversMap[match.match_format] || 20;
+    const maxOvers = maxOversMap[match.format] || 20;
 
     // Fetch team names
     const { data: homeTeam } = await supabase.from('teams').select('name').eq('id', match.home_team_id).single();
@@ -384,7 +531,7 @@ router.post('/:tournamentId/run-all', async (req, res) => {
       .from('matches')
       .select('id')
       .eq('tournament_id', tournamentId)
-      .eq('status', 'scheduled');
+      .eq('status', 'pending');
 
     if (error) throw error;
 
@@ -519,7 +666,6 @@ class TournamentMatchEngine extends MatchEngine {
           home_overs: homeOvers || this.maxOvers,
           away_overs: awayOvers || this.maxOvers,
           winner_team_id: winnerTeamId,
-          match_result: matchResult,
           completed_at: new Date().toISOString(),
         })
         .eq('id', this.matchId);
