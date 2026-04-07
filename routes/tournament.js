@@ -189,7 +189,7 @@ router.post('/:tournamentId/join', async (req, res) => {
   }
 });
 
-// ─── Create tournament (admin/system) ─────────────────────────────
+// ─── Create tournament (any user) ─────────────────────────────────
 
 router.post('/create', async (req, res) => {
   try {
