@@ -896,8 +896,7 @@ async function loadTournamentTeamXI(teamId) {
     }
 
     const players = (squad.squad_players || [])
-      .filter(sp => sp.is_playing_xi)
-      .sort((a, b) => (a.batting_order || 0) - (b.batting_order || 0));
+      .sort((a, b) => (a.position || 99) - (b.position || 99));
 
     if (players.length === 0) {
       logger.error(`No playing XI for team ${teamId}`);
