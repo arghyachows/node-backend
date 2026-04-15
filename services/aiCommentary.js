@@ -56,8 +56,8 @@ async function generateAICommentary(context) {
 
   let commentary;
 
-  // Use Ollama AI for key events, templates for everything else
-  if (AI_EVENTS.has(eventType)) {
+  // Use Ollama AI for key events only when useAI is explicitly enabled
+  if (context.useAI !== false && AI_EVENTS.has(eventType) && OLLAMA_API_KEY) {
     try {
       commentary = await generateOllamaCommentary(context);
     } catch (err) {

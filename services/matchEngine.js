@@ -307,32 +307,27 @@ class MatchEngine {
         eventType = 'dot_ball';
     }
 
-    // Generate commentary (template engine is instant — use for all events)
-    const useAI = this.useAICommentary;
-    
-    if (useAI) {
-      try {
-        commentary = await generateAICommentary({
-          eventType,
-          runs,
-          batsmanName,
-          bowlerName,
-          innings: this.innings,
-          overNumber: this.overNumber,
-          ballNumber: this.ballNumber,
-          currentScore: this.isFirstInnings ? this.score1 : this.score2,
-          currentWickets: this.currentWickets,
-          target: this.target,
-          wicketType,
-          fielderName,
-          isFreeHit,
-          isSuperOver: this.isSuperOver,
-        });
-      } catch (error) {
-        logger.error('AI commentary failed:', error);
-        commentary = this.getFallbackCommentary(eventType, batsmanName, bowlerName, wicketType, fielderName, isFreeHit);
-      }
-    } else {
+    // Generate commentary — always use rich template engine (+ optional AI for key events)
+    try {
+      commentary = await generateAICommentary({
+        eventType,
+        runs,
+        batsmanName,
+        bowlerName,
+        innings: this.innings,
+        overNumber: this.overNumber,
+        ballNumber: this.ballNumber,
+        currentScore: this.isFirstInnings ? this.score1 : this.score2,
+        currentWickets: this.currentWickets,
+        target: this.target,
+        wicketType,
+        fielderName,
+        isFreeHit,
+        isSuperOver: this.isSuperOver,
+        useAI: this.useAICommentary, // only call Ollama when true
+      });
+    } catch (error) {
+      logger.error('Commentary generation failed:', error);
       commentary = this.getFallbackCommentary(eventType, batsmanName, bowlerName, wicketType, fielderName, isFreeHit);
     }
 
