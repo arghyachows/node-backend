@@ -10,9 +10,10 @@ const axios = require('axios');
  * - Timeout + fallback to templates if Ollama is slow/down
  */
 
-const OLLAMA_URL = process.env.OLLAMA_URL || 'http://ollama-railway.railway.internal:11434';
+const OLLAMA_URL = process.env.OLLAMA_URL || 'https://api.ollama.com';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5:0.5b';
 const OLLAMA_TIMEOUT = parseInt(process.env.OLLAMA_TIMEOUT || '3000', 10);
+const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || '';
 const AI_EVENTS = new Set(['wicket', 'six', 'four']); // Only generate AI for these
 
 const commentaryCache = new Map();
@@ -128,6 +129,11 @@ async function generateOllamaCommentary(context) {
 ${overInfo}.${chaseInfo} ${eventDesc}
 Reply with ONLY the commentary line, no quotes or explanation.`;
 
+  const headers = { 'Content-Type': 'application/json' };
+  if (OLLAMA_API_KEY) {
+    headers['Authorization'] = `Bearer ${OLLAMA_API_KEY}`;
+  }
+
   const response = await axios.post(`${OLLAMA_URL}/api/generate`, {
     model: OLLAMA_MODEL,
     prompt,
@@ -139,6 +145,7 @@ Reply with ONLY the commentary line, no quotes or explanation.`;
     },
   }, {
     timeout: OLLAMA_TIMEOUT,
+    headers,
   });
 
   const text = response.data?.response?.trim();
