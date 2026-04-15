@@ -327,7 +327,7 @@ class MatchEngine {
         useAI: this.useAICommentary, // only call Ollama when true
       });
     } catch (error) {
-      logger.error('Commentary generation failed:', error);
+      logger.info(`[AI Commentary] Engine error, using basic fallback: ${error.message}`);
       commentary = this.getFallbackCommentary(eventType, batsmanName, bowlerName, wicketType, fielderName, isFreeHit);
     }
 

@@ -57,13 +57,22 @@ async function generateAICommentary(context) {
   let commentary;
 
   // Use Ollama AI for key events only when useAI is explicitly enabled
-  if (context.useAI !== false && AI_EVENTS.has(eventType) && OLLAMA_API_KEY) {
+  const shouldCallAI = context.useAI !== false && AI_EVENTS.has(eventType) && OLLAMA_API_KEY;
+  if (shouldCallAI) {
+    logger.info(`[AI Commentary] Calling Ollama for ${eventType} | ${OLLAMA_MODEL} | useAI=${context.useAI}`);
     try {
       commentary = await generateOllamaCommentary(context);
+      if (commentary) {
+        logger.info(`[AI Commentary] ✓ Ollama generated: "${commentary.substring(0, 60)}..."`);
+      } else {
+        logger.info(`[AI Commentary] ✗ Ollama returned empty/invalid — using template`);
+      }
     } catch (err) {
-      logger.warn(`Ollama commentary failed for ${eventType}: ${err.message}`);
+      logger.info(`[AI Commentary] ✗ Ollama failed: ${err.message} — using template`);
       commentary = null;
     }
+  } else {
+    logger.info(`[AI Commentary] Template mode | event=${eventType} | useAI=${context.useAI} | hasKey=${!!OLLAMA_API_KEY}`);
   }
 
   // Fallback to template if Ollama didn't produce anything
