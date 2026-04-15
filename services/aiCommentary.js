@@ -1,4 +1,3 @@
-const { getCachedCommentary, setCachedCommentary } = require('./redis');
 const logger = require('../utils/logger');
 const axios = require('axios');
 
@@ -16,10 +15,21 @@ const OLLAMA_TIMEOUT = parseInt(process.env.OLLAMA_TIMEOUT || '3000', 10);
 const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || '';
 const AI_EVENTS = new Set(['wicket', 'six', 'four']); // Only generate AI for these
 
-const commentaryCache = new Map();
+// Track recently used templates to avoid repeats
+const recentCommentary = [];
+const MAX_RECENT = 30;
 
 function pick(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
+  // Filter out recently used commentary
+  const unused = arr.filter(item => !recentCommentary.includes(item));
+  const pool = unused.length > 0 ? unused : arr; // fallback to full list if all used
+  const chosen = pool[Math.floor(Math.random() * pool.length)];
+  
+  recentCommentary.push(chosen);
+  if (recentCommentary.length > MAX_RECENT) {
+    recentCommentary.shift();
+  }
+  return chosen;
 }
 
 async function generateAICommentary(context) {
@@ -35,24 +45,6 @@ async function generateAICommentary(context) {
     bowlerName,
     fielderName,
   } = context;
-
-  const cacheKey = buildCacheKey(eventType, innings, currentScore, currentWickets, target, wicketType, isSuperOver);
-
-  // Check in-memory cache
-  if (commentaryCache.has(cacheKey)) {
-    return personalizeCommentary(commentaryCache.get(cacheKey), context);
-  }
-
-  // Check Redis cache
-  try {
-    const cached = await getCachedCommentary(cacheKey);
-    if (cached) {
-      commentaryCache.set(cacheKey, cached);
-      return personalizeCommentary(cached, context);
-    }
-  } catch (e) {
-    // Redis unavailable — proceed to generate
-  }
 
   let commentary;
 
@@ -75,32 +67,9 @@ async function generateAICommentary(context) {
     logger.info(`[AI Commentary] Template mode | event=${eventType} | useAI=${context.useAI} | hasKey=${!!OLLAMA_API_KEY}`);
   }
 
-  // Fallback to template if Ollama didn't produce anything
+  // Always generate fresh template commentary (no caching — ensures uniqueness)
   if (!commentary) {
     commentary = generateTemplateCommentary(context);
-  }
-
-  // Cache a generic (depersonalized) version
-  const escBat = batsmanName ? batsmanName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '';
-  const escBowl = bowlerName ? bowlerName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '';
-  const escField = fielderName ? fielderName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '';
-
-  let generic = commentary;
-  if (escBat) generic = generic.replace(new RegExp(escBat, 'g'), 'BATSMAN');
-  if (escBowl) generic = generic.replace(new RegExp(escBowl, 'g'), 'BOWLER');
-  if (escField) generic = generic.replace(new RegExp(escField, 'g'), 'FIELDER');
-
-  try {
-    await setCachedCommentary(cacheKey, generic);
-  } catch (e) {
-    // Redis unavailable — non-fatal
-  }
-  commentaryCache.set(cacheKey, generic);
-
-  // Limit in-memory cache
-  if (commentaryCache.size > 100) {
-    const firstKey = commentaryCache.keys().next().value;
-    commentaryCache.delete(firstKey);
   }
 
   return commentary;
@@ -163,26 +132,6 @@ Reply with ONLY the spoken commentary line, no quotes or explanation.`;
   }
 
   return text;
-}
-
-function buildCacheKey(eventType, innings, currentScore, currentWickets, target, wicketType, isSuperOver) {
-  let situation = '';
-  if (isSuperOver) {
-    situation = 'SO';
-  } else if (innings === 1) {
-    if (currentScore >= 150) situation = 'I1_BIG';
-    else if (currentScore >= 80) situation = 'I1_MID';
-    else situation = 'I1_EARLY';
-  } else {
-    const runsNeeded = (target || 0) + 1 - (currentScore || 0);
-    if (runsNeeded <= 6) situation = 'LASTHIT';
-    else if (runsNeeded <= 15) situation = 'NAIL';
-    else if (runsNeeded <= 30) situation = 'CLOSE';
-    else if (runsNeeded <= 60) situation = 'CHASE';
-    else situation = 'I2_EARLY';
-  }
-  const wicketSituation = currentWickets >= 8 ? 'TAIL' : currentWickets >= 5 ? 'MID' : currentWickets <= 1 ? 'TOP' : 'SET';
-  return `${eventType}_${situation}_${wicketSituation}_${wicketType || 'none'}_${Math.floor(Math.random() * 3)}`;
 }
 
 // ─── Situation helper ─────────────────────────────────────────────
@@ -498,22 +447,6 @@ function generateNoBallCommentary(bowl, bat, situation) {
     );
   }
   return pick(templates);
-}
-
-// ─── Personalization ─────────────────────────────────────────────
-
-function personalizeCommentary(commentary, context) {
-  const { batsmanName, bowlerName, fielderName, isFreeHit, eventType } = context;
-
-  let personalized = commentary
-    .replace(/BATSMAN/g, batsmanName || 'Batsman')
-    .replace(/BOWLER/g, bowlerName || 'Bowler')
-    .replace(/FIELDER/g, fielderName || 'the fielder');
-
-  if (isFreeHit && eventType !== 'no_ball') {
-    personalized += ' (Free Hit)';
-  }
-  return personalized;
 }
 
 module.exports = { generateAICommentary };
