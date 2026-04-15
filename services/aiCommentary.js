@@ -1,10 +1,19 @@
 const { getCachedCommentary, setCachedCommentary } = require('./redis');
 const logger = require('../utils/logger');
+const axios = require('axios');
 
 /**
- * Rich template-based cricket commentary engine.
- * Zero cost, zero latency, no external API dependency.
+ * Hybrid cricket commentary engine:
+ * - Ollama AI for key events (wickets, fours, sixes)
+ * - Rich templates for everything else (dot balls, singles, etc.)
+ * - Redis + in-memory caching
+ * - Timeout + fallback to templates if Ollama is slow/down
  */
+
+const OLLAMA_URL = process.env.OLLAMA_URL || 'http://ollama-railway.railway.internal:11434';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5:0.5b';
+const OLLAMA_TIMEOUT = parseInt(process.env.OLLAMA_TIMEOUT || '3000', 10);
+const AI_EVENTS = new Set(['wicket', 'six', 'four']); // Only generate AI for these
 
 const commentaryCache = new Map();
 
@@ -44,8 +53,22 @@ async function generateAICommentary(context) {
     // Redis unavailable — proceed to generate
   }
 
-  // Generate context-aware commentary from templates
-  const commentary = generateTemplateCommentary(context);
+  let commentary;
+
+  // Use Ollama AI for key events, templates for everything else
+  if (AI_EVENTS.has(eventType)) {
+    try {
+      commentary = await generateOllamaCommentary(context);
+    } catch (err) {
+      logger.warn(`Ollama commentary failed for ${eventType}: ${err.message}`);
+      commentary = null;
+    }
+  }
+
+  // Fallback to template if Ollama didn't produce anything
+  if (!commentary) {
+    commentary = generateTemplateCommentary(context);
+  }
 
   // Cache a generic (depersonalized) version
   const escBat = batsmanName ? batsmanName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '';
@@ -71,6 +94,59 @@ async function generateAICommentary(context) {
   }
 
   return commentary;
+}
+
+// ─── Ollama AI Commentary ─────────────────────────────────────────
+
+async function generateOllamaCommentary(context) {
+  const { eventType, batsmanName, bowlerName, fielderName, wicketType, innings,
+    overNumber, ballNumber, currentScore, currentWickets, target, isSuperOver, isFreeHit } = context;
+
+  const situation = getSituation(context);
+  const chaseInfo = innings === 2 && target > 0
+    ? ` Chasing ${target + 1}, currently ${currentScore}/${currentWickets}.`
+    : ` Score: ${currentScore}/${currentWickets}.`;
+  const overInfo = `Over ${overNumber}.${ballNumber}`;
+  const superOverTag = isSuperOver ? ' SUPER OVER!' : '';
+
+  let eventDesc;
+  switch (eventType) {
+    case 'six':
+      eventDesc = `${batsmanName} hits a SIX off ${bowlerName}!`;
+      break;
+    case 'four':
+      eventDesc = `${batsmanName} hits a FOUR off ${bowlerName}!`;
+      break;
+    case 'wicket':
+      eventDesc = `WICKET! ${batsmanName} is out ${wicketType || 'dismissed'}${fielderName ? ` by ${fielderName}` : ''}, bowled by ${bowlerName}!`;
+      break;
+    default:
+      eventDesc = `${bowlerName} to ${batsmanName}.`;
+  }
+
+  const prompt = `You are an exciting cricket TV commentator. Generate ONE short commentary line (max 25 words) for this event.${superOverTag}
+${overInfo}.${chaseInfo} ${eventDesc}
+Reply with ONLY the commentary line, no quotes or explanation.`;
+
+  const response = await axios.post(`${OLLAMA_URL}/api/generate`, {
+    model: OLLAMA_MODEL,
+    prompt,
+    stream: false,
+    options: {
+      temperature: 0.8,
+      top_p: 0.9,
+      num_predict: 60,
+    },
+  }, {
+    timeout: OLLAMA_TIMEOUT,
+  });
+
+  const text = response.data?.response?.trim();
+  if (!text || text.length < 5 || text.length > 200) {
+    return null; // Bad response, fall back to template
+  }
+
+  return text;
 }
 
 function buildCacheKey(eventType, innings, currentScore, currentWickets, target, wicketType, isSuperOver) {

@@ -12,10 +12,14 @@ services:
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
       - CLOUDFLARE_AI_WORKER_URL=${CLOUDFLARE_AI_WORKER_URL}
+      - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_MODEL=qwen2.5:0.5b
+      - OLLAMA_TIMEOUT=3000
       - NODE_ENV=production
       - CORS_ORIGIN=*
     depends_on:
       - redis
+      - ollama
     restart: unless-stopped
     networks:
       - cricket-network
@@ -32,9 +36,22 @@ services:
       - cricket-network
     command: redis-server --appendonly yes
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: cricket-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    restart: unless-stopped
+    networks:
+      - cricket-network
+    # Pull model on first start: docker exec cricket-ollama ollama pull qwen2.5:0.5b
+
 networks:
   cricket-network:
     driver: bridge
 
 volumes:
   redis-data:
+  ollama-data:
