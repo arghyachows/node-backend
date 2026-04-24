@@ -527,6 +527,106 @@ class MatchEngine {
     probs.wicket -= 0.05 * normalized;
     probs.single += 0.03 * normalized;
 
+    const aggression = batsman.aggression ?? battingRating;
+    const technique = batsman.technique ?? battingRating;
+    const power = batsman.power ?? battingRating;
+    const consistency = batsman.consistency ?? battingRating;
+    const pace = bowler.pace ?? bowlingRating;
+    const accuracy = bowler.accuracy ?? bowlingRating;
+    const variations = bowler.variations ?? bowlingRating;
+
+    probs.six += aggression * 0.001;
+    probs.wicket += aggression * 0.0005;
+    probs.dot -= aggression * 0.0008;
+    probs.six += power * 0.0008;
+    probs.four += power * 0.0006;
+    probs.single += technique * 0.0005;
+    probs.double += technique * 0.0003;
+    probs.wicket -= technique * 0.0004;
+    probs.dot += consistency * 0.0003;
+    probs.wicket -= consistency * 0.0005;
+    probs.dot += accuracy * 0.001;
+    probs.wicket += accuracy * 0.0007;
+    probs.wide -= accuracy * 0.0003;
+    probs.no_ball -= accuracy * 0.0002;
+    probs.wicket += pace * 0.0005;
+    probs.dot += pace * 0.0003;
+    probs.wicket += variations * 0.0003;
+    probs.dot += variations * 0.0002;
+
+    const powerplayEnd = Math.min(10, Math.floor(this.maxOvers * 0.3));
+    const middleOversEnd = Math.floor(this.maxOvers * 0.8);
+
+    if (this.overNumber >= middleOversEnd) {
+      probs.six += 0.05; probs.four += 0.03; probs.wicket += 0.03;
+      probs.dot -= 0.05; probs.single -= 0.02;
+    } else if (this.overNumber < powerplayEnd) {
+      probs.four += 0.03; probs.six += 0.02; probs.dot -= 0.02;
+    } else {
+      probs.single += 0.05; probs.double += 0.02;
+      probs.dot += 0.02; probs.six -= 0.02;
+    }
+
+    if (!this.isFirstInnings && this.target > 0) {
+      const currentScore = this.score2;
+      const ballsRemaining = (this.maxOvers * 6) - (this.overNumber * 6 + this.ballNumber);
+      const runsNeeded = this.target + 1 - currentScore;
+      const requiredRunRate = ballsRemaining > 0 ? (runsNeeded / ballsRemaining) * 6 : 0;
+      
+      if (requiredRunRate > 10) {
+        probs.six += 0.07; probs.four += 0.04;
+        probs.wicket += 0.04; probs.dot -= 0.08;
+      } else if (requiredRunRate > 8) {
+        probs.six += 0.04; probs.four += 0.03;
+        probs.wicket += 0.02; probs.dot -= 0.04;
+      }
+      
+      if (requiredRunRate < 6) {
+        probs.single += 0.05; probs.dot += 0.03;
+        probs.six -= 0.03; probs.wicket -= 0.02;
+      }
+    }
+
+    const currentWickets = this.currentWickets;
+    if (currentWickets >= 7) {
+      probs.wicket += 0.05; probs.dot += 0.05;
+      probs.six -= 0.03; probs.four -= 0.03;
+    } else if (currentWickets <= 2) {
+      probs.wicket -= 0.02; probs.single += 0.02;
+    }
+
+    switch (this.pitchCondition) {
+      case 'batting_friendly':
+      case 'flat':
+        probs.four += 0.05; probs.six += 0.05;
+        probs.wicket -= 0.03; probs.dot -= 0.03;
+        break;
+      case 'bowling_friendly':
+      case 'green':
+        probs.wicket += 0.05; probs.dot += 0.05;
+        probs.four -= 0.03; probs.six -= 0.03;
+        break;
+      case 'spin_friendly':
+      case 'dusty':
+        probs.wicket += 0.03; probs.dot += 0.04; probs.six -= 0.02;
+        break;
+    }
+
+    const chemMod = chemistry / 500;
+    probs.four += chemMod * 0.02;
+    probs.six += chemMod * 0.01;
+    probs.wicket -= chemMod * 0.02;
+
+    probs.dot = clamp(probs.dot, 0.05, 0.6);
+    probs.single = clamp(probs.single, 0.1, 0.45);
+    probs.double = clamp(probs.double, 0.02, 0.2);
+    probs.triple = clamp(probs.triple, 0.005, 0.05);
+    probs.four = clamp(probs.four, 0.02, 0.3);
+    probs.six = clamp(probs.six, 0.01, 0.2);
+    probs.wicket = clamp(probs.wicket, 0.01, 0.2);
+    probs.wide = clamp(probs.wide, 0.005, 0.05);
+    probs.no_ball = clamp(probs.no_ball, 0.005, 0.03);
+
     const total = Object.values(probs).reduce((a, b) => a + b, 0);
     for (const key in probs) {
       probs[key] /= total;
@@ -739,6 +839,10 @@ class MatchEngine {
 
 function pick(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function clamp(val, min, max) {
+  return Math.min(Math.max(val, min), max);
 }
 
 module.exports = MatchEngine;
