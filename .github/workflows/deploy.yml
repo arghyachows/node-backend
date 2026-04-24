@@ -23,12 +23,9 @@ jobs:
           curl -fsSL https://clis.cloud.ibm.com/install/linux | sh
           ibmcloud plugin install code-engine -f
 
-      - name: Login to IBM Cloud
+      - name: Authenticate with IBM Cloud
         run: |
           ibmcloud login --apikey "${{ secrets.IBM_CLOUD_API_KEY }}" -r "$IBM_CLOUD_REGION" -g Default
-
-      - name: Select Code Engine project
-        run: |
           ibmcloud ce project select --name "$CE_PROJECT"
 
       - name: Deploy from source
