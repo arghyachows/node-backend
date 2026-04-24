@@ -2,7 +2,8 @@ name: Deploy to IBM Cloud Code Engine
 
 on:
   push:
-    branches: [main]
+    branches: [master]
+  workflow_dispatch:
 
 env:
   IBM_CLOUD_API_KEY: ${{ secrets.IBM_CLOUD_API_KEY }}
