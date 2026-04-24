@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-deployment
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+      - name: backend
+        # ⚠️ REPLACE THIS with your actual IBM Cloud Container Registry URL
+        # Format: <region>.icr.io/<my_namespace>/cricket-backend:latest
+        image: icr.io/my_cricket_namespace/cricket-backend:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3000
+        envFrom:
+        - configMapRef:
+            name: backend-config
+        env:
+        - name: SUPABASE_URL
+          value: "https://kollxlzqqgznfiutpqjz.supabase.co"
+        - name: SUPABASE_SERVICE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: backend-secrets
+              key: SUPABASE_SERVICE_KEY
