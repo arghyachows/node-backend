@@ -9,10 +9,12 @@ const axios = require('axios');
  * - Timeout + fallback to templates if Ollama is slow/down
  */
 
-const OLLAMA_URL = process.env.OLLAMA_URL || 'https://api.ollama.com';
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5:0.5b';
-const OLLAMA_TIMEOUT = parseInt(process.env.OLLAMA_TIMEOUT || '3000', 10);
-const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || '';
+const { WatsonXAI } = require('@ibm-cloud/watsonx-ai');
+const { IamAuthenticator } = require('ibm-cloud-sdk-core');
+const WATSONX_PROJECT_ID = process.env.WATSONX_PROJECT_ID || '';
+const IBM_CLOUD_API_KEY = process.env.IBM_CLOUD_API_KEY || '';
+const WATSONX_URL = process.env.WATSONX_URL || 'https://us-south.ml.cloud.ibm.com';
+const WATSONX_MODEL = process.env.WATSONX_MODEL || 'meta-llama/llama-3-3-70b-instruct';
 const AI_EVENTS = new Set(['wicket', 'six', 'four']); // Only generate AI for these
 
 // Track recently used templates to avoid repeats
@@ -48,23 +50,23 @@ async function generateAICommentary(context) {
 
   let commentary;
 
-  // Use Ollama AI for key events only when useAI is explicitly enabled
-  const shouldCallAI = context.useAI !== false && AI_EVENTS.has(eventType) && OLLAMA_API_KEY;
+  // Use WatsonX AI for key events only when useAI is explicitly enabled
+  const shouldCallAI = context.useAI !== false && AI_EVENTS.has(eventType) && IBM_CLOUD_API_KEY && WATSONX_PROJECT_ID;
   if (shouldCallAI) {
-    logger.info(`[AI Commentary] Calling Ollama for ${eventType} | ${OLLAMA_MODEL} | useAI=${context.useAI}`);
+    logger.info(`[AI Commentary] Calling WatsonX for ${eventType} | ${WATSONX_MODEL} | useAI=${context.useAI}`);
     try {
-      commentary = await generateOllamaCommentary(context);
+      commentary = await generateWatsonxCommentary(context);
       if (commentary) {
-        logger.info(`[AI Commentary] ✓ Ollama generated: "${commentary.substring(0, 60)}..."`);
+        logger.info(`[AI Commentary] ✓ WatsonX generated: "${commentary.substring(0, 60)}..."`);
       } else {
-        logger.info(`[AI Commentary] ✗ Ollama returned empty/invalid — using template`);
+        logger.info(`[AI Commentary] ✗ WatsonX returned empty/invalid — using template`);
       }
     } catch (err) {
-      logger.info(`[AI Commentary] ✗ Ollama failed: ${err.message} — using template`);
+      logger.info(`[AI Commentary] ✗ WatsonX failed: ${err.message} — using template`);
       commentary = null;
     }
   } else {
-    logger.info(`[AI Commentary] Template mode | event=${eventType} | useAI=${context.useAI} | hasKey=${!!OLLAMA_API_KEY}`);
+    logger.info(`[AI Commentary] Template mode | event=${eventType} | useAI=${context.useAI} | hasKey=${!!IBM_CLOUD_API_KEY}`);
   }
 
   // Always generate fresh template commentary (no caching — ensures uniqueness)
@@ -75,9 +77,9 @@ async function generateAICommentary(context) {
   return commentary;
 }
 
-// ─── Ollama AI Commentary ─────────────────────────────────────────
+// ─── WatsonX AI Commentary ─────────────────────────────────────────
 
-async function generateOllamaCommentary(context) {
+async function generateWatsonxCommentary(context) {
   const { eventType, batsmanName, bowlerName, fielderName, wicketType, innings,
     overNumber, ballNumber, currentScore, currentWickets, target, isSuperOver, isFreeHit } = context;
 
@@ -107,26 +109,26 @@ async function generateOllamaCommentary(context) {
 ${overInfo}.${chaseInfo} ${eventDesc}
 Reply with ONLY the spoken commentary line, no quotes or explanation.`;
 
-  const headers = { 'Content-Type': 'application/json' };
-  if (OLLAMA_API_KEY) {
-    headers['Authorization'] = `Bearer ${OLLAMA_API_KEY}`;
-  }
-
-  const response = await axios.post(`${OLLAMA_URL}/api/generate`, {
-    model: OLLAMA_MODEL,
-    prompt,
-    stream: false,
-    options: {
-      temperature: 0.8,
-      top_p: 0.9,
-      num_predict: 60,
-    },
-  }, {
-    timeout: OLLAMA_TIMEOUT,
-    headers,
+  const watsonxAIService = WatsonXAI.newInstance({
+    version: '2023-05-29',
+    serviceUrl: WATSONX_URL,
+    authenticator: new IamAuthenticator({
+      apikey: IBM_CLOUD_API_KEY,
+    }),
   });
 
-  const text = response.data?.response?.trim();
+  const response = await watsonxAIService.generateText({
+    modelId: WATSONX_MODEL,
+    projectId: WATSONX_PROJECT_ID,
+    input: prompt,
+    parameters: {
+      max_new_tokens: 50,
+      temperature: 0.7,
+      repetition_penalty: 1.1
+    }
+  });
+
+  const text = response.result.results[0].generated_text.trim();
   if (!text || text.length < 5 || text.length > 200) {
     return null; // Bad response, fall back to template
   }
