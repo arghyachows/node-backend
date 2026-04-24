@@ -138,8 +138,8 @@ class MatchEngine {
         logger.warn(`Redis publish failed for match ${this.matchId}: ${pubErr.message}`);
       }
 
-      // Schedule next ball
-      this.timer = setTimeout(() => this.loop(), 1000);
+      // Schedule next ball (2.5s gives WatsonX AI time to generate commentary)
+      this.timer = setTimeout(() => this.loop(), 2500);
     } catch (error) {
       logger.error(`Match ${this.matchId} simulation error:`, error);
       this.stop();
@@ -194,6 +194,8 @@ class MatchEngine {
       currentBatsman: this.currentBatsman?.name,
       nonStriker: this.nonStriker?.name,
       currentBowler: this.currentBowler?.name,
+      currentCommentary: this.commentaryLog.length > 0 ? this.commentaryLog[this.commentaryLog.length - 1].commentary : null,
+      commentaryLog: this.commentaryLog,
     };
   }
 

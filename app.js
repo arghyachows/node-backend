@@ -42,11 +42,15 @@ app.use(cors({
   credentials: true,
 }));
 
+// Trust proxy (IBM Cloud Code Engine runs behind a reverse proxy)
+app.set('trust proxy', 1);
+
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100,
   message: { error: 'Too many requests' },
+  validate: false, // Disable validation for proxy environments
 });
 app.use(limiter);
 

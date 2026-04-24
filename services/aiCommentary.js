@@ -14,7 +14,7 @@ const { IamAuthenticator } = require('ibm-cloud-sdk-core');
 const WATSONX_PROJECT_ID = process.env.WATSONX_PROJECT_ID || '';
 const IBM_CLOUD_API_KEY = process.env.IBM_CLOUD_API_KEY || '';
 const WATSONX_URL = process.env.WATSONX_URL || 'https://us-south.ml.cloud.ibm.com';
-const WATSONX_MODEL = process.env.WATSONX_MODEL || 'meta-llama/llama-3-3-70b-instruct';
+const WATSONX_MODEL = process.env.WATSONX_MODEL || 'meta-llama/llama-4-maverick-17b-128e-instruct-fp8';
 const AI_EVENTS = new Set(['wicket', 'six', 'four']); // Only generate AI for these
 
 // Track recently used templates to avoid repeats
@@ -105,9 +105,9 @@ async function generateWatsonxCommentary(context) {
       eventDesc = `${bowlerName} to ${batsmanName}.`;
   }
 
-  const prompt = `You are a passionate, eloquent cricket TV commentator known for vivid, verbal descriptions. Speak naturally as if talking to millions of viewers — use rhythm, emotion, and drama. Generate ONE spoken commentary line (max 30 words) for this event.${superOverTag}
+  const prompt = `You are a cricket TV commentator. Write ONE short, vivid commentary line (under 25 words) for this moment.${superOverTag}
 ${overInfo}.${chaseInfo} ${eventDesc}
-Reply with ONLY the spoken commentary line, no quotes or explanation.`;
+Commentary:`;
 
   const watsonxAIService = WatsonXAI.newInstance({
     version: '2023-05-29',
@@ -122,13 +122,39 @@ Reply with ONLY the spoken commentary line, no quotes or explanation.`;
     projectId: WATSONX_PROJECT_ID,
     input: prompt,
     parameters: {
-      max_new_tokens: 50,
+      max_new_tokens: 40,
       temperature: 0.7,
-      repetition_penalty: 1.1
+      repetition_penalty: 1.1,
+      stop_sequences: ['\n', '"', 'Commentary:', '<|', 'Note:', 'Reply'],
     }
   });
 
-  const text = response.result.results[0].generated_text.trim();
+  let text = response.result.results[0].generated_text.trim();
+
+  // ── Clean LLM artifacts ──
+  // Strip common LLM junk: quotes, markdown, meta-text, special tokens
+  text = text
+    .replace(/<\|.*?\|>/g, '')              // <|end_of_text|>, <|eot_id|>, etc.
+    .replace(/<end of text>/gi, '')
+    .replace(/<lend of text>/gi, '')
+    .replace(/```[\s\S]*?```/g, '')         // code blocks
+    .replace(/\*\*/g, '')                    // bold markdown
+    .replace(/^\s*["'`]+|["'`]+\s*$/g, '')  // surrounding quotes
+    .replace(/^\s*[-–—•]\s*/g, '')          // bullet points
+    .replace(/\d+\s*min\s*read/gi, '')      // "2 min read"
+    .replace(/i changed.*?for you/gi, '')   // "I changed it for you"
+    .replace(/here'?s?\s*(the|a|your)?\s*commentary.*/gi, '') // "Here's the commentary:"
+    .replace(/commentary\s*:/gi, '')        // leftover "Commentary:"
+    .replace(/reply\s*:/gi, '')
+    .replace(/note\s*:/gi, '')
+    .replace(/\n.*/g, '')                   // everything after first newline
+    .trim();
+
+  // Add back trailing punctuation if stripped by stop_sequences
+  if (text && !/[.!?]$/.test(text)) {
+    text += '!';
+  }
+
   if (!text || text.length < 5 || text.length > 200) {
     return null; // Bad response, fall back to template
   }
