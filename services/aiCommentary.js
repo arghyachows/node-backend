@@ -125,11 +125,12 @@ Commentary:`;
       max_new_tokens: 40,
       temperature: 0.7,
       repetition_penalty: 1.1,
-      stop_sequences: ['\n', '"', 'Commentary:', '<|', 'Note:', 'Reply'],
+      stop_sequences: ['Commentary:', '<|', 'Note:', 'Reply'],
     }
   });
 
-  let text = response.result.results[0].generated_text.trim();
+  let rawText = response.result.results[0].generated_text || '';
+  let text = rawText.trim();
 
   // ── Clean LLM artifacts ──
   // Strip common LLM junk: quotes, markdown, meta-text, special tokens
@@ -147,8 +148,12 @@ Commentary:`;
     .replace(/commentary\s*:/gi, '')        // leftover "Commentary:"
     .replace(/reply\s*:/gi, '')
     .replace(/note\s*:/gi, '')
-    .replace(/\n.*/g, '')                   // everything after first newline
+    .replace(/\n[\s\S]*/g, '')                   // everything after first newline
     .trim();
+
+  if (!text && rawText.trim()) {
+    logger.debug(`[AI Commentary] Raw output exists but was cleaned to empty: "${rawText}"`);
+  }
 
   // Add back trailing punctuation if stripped by stop_sequences
   if (text && !/[.!?]$/.test(text)) {
