@@ -130,6 +130,7 @@ Commentary:`;
   });
 
   let text = response.result.results[0].generated_text.trim();
+  logger.info(`[AI Commentary] Raw text from WatsonX: "${text}"`);
 
   // ── Clean LLM artifacts ──
   // Strip common LLM junk: quotes, markdown, meta-text, special tokens
