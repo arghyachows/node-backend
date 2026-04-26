@@ -51,7 +51,7 @@ jobs:
           RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
             -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}")
           echo "Response code: $RESPONSE"
-          if [ "$RESPONSE" != "200" ] && [ "$RESPONSE" != "201" ]; then
+          if [[ "$RESPONSE" != 2* ]]; then
             echo "❌ Render deploy hook failed with status $RESPONSE"
             exit 1
           fi
