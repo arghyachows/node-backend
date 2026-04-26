@@ -1,0 +1,37 @@
+services:
+  # Node.js Web Service
+  - type: web
+    name: cricket-ultimate-backend
+    runtime: node
+    region: singapore  # Closest region for South Asia
+    plan: free
+    buildCommand: npm install
+    startCommand: node app.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000  # Render's default internal port
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: cricket-redis
+          property: connectionString
+      - key: SUPABASE_URL
+        sync: false  # Set manually in dashboard
+      - key: SUPABASE_SERVICE_KEY
+        sync: false  # Set manually in dashboard
+      - key: CLOUDFLARE_AI_WORKER_URL
+        sync: false  # Set manually in dashboard
+      - key: LOG_LEVEL
+        value: info
+      - key: CORS_ORIGIN
+        value: "*"
+
+  # Redis Instance
+  - type: redis
+    name: cricket-redis
+    region: singapore
+    plan: free
+    maxmemoryPolicy: allkeys-lru
