@@ -526,7 +526,7 @@ router.post('/:tournamentId/run-match/:matchId', async (req, res) => {
       homeTeamName: homeTeam?.team_name || 'Home',
       awayTeamName: awayTeam?.team_name || 'Away',
       homeBatsFirst: Math.random() > 0.5,
-      useAICommentary: true,
+      useAICommentary: false,
     };
 
     const io = req.app.get('io');

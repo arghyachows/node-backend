@@ -15,7 +15,7 @@ class MatchEngine {
     this.homeTeamName = config.homeTeamName;
     this.awayTeamName = config.awayTeamName;
     this.homeBatsFirst = config.homeBatsFirst;
-    this.useAICommentary = config.useAICommentary !== false;
+    this.useAICommentary = config.useAICommentary === true; // Default to false
 
     this.innings = 1;
     this.overNumber = 0;
