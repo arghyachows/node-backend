@@ -1,9 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: backend-config
-data:
-  PORT: "3000"
-  NODE_ENV: "production"
-  CORS_ORIGIN: "*"
-  REDIS_URL: "redis://redis-service:6379"
