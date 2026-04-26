@@ -154,7 +154,7 @@ class MatchEngine {
         logger.warn(`Redis publish failed for match ${this.matchId}: ${pubErr.message}`);
       }
 
-      // Schedule next ball (2.5s gives WatsonX AI time to generate commentary)
+      // Schedule next ball (2.5s gives Ollama Cloud time to generate commentary)
       this.timer = setTimeout(() => this.loop(), 2500);
     } catch (error) {
       logger.error(`Match ${this.matchId} simulation error:`, error);
