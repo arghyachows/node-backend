@@ -1,11 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const MatchEngine = require('../services/matchEngine');
+const matchManager = require('../services/matchManager');
 const { getMatchState, addActiveMatch, removeActiveMatch } = require('../services/redis');
 const logger = require('../utils/logger');
-
-// Store active match engines
-const activeMatches = new Map();
 
 // Start match
 router.post('/start', async (req, res) => {
@@ -17,20 +14,16 @@ router.post('/start', async (req, res) => {
     }
 
     // Check if match already running
-    if (activeMatches.has(matchId)) {
+    if (matchManager.getEngine(matchId)) {
       return res.status(400).json({ error: 'Match already running' });
     }
 
-    // Create match engine
+    // Create match engine via manager
     const io = req.app.get('io');
-    const engine = new MatchEngine(matchId, config, io);
-    activeMatches.set(matchId, engine);
+    matchManager.startMatch(matchId, config, io);
 
-    // Track active match
+    // Track active match in Redis for recovery
     await addActiveMatch(matchId);
-
-    // Start simulation
-    engine.start();
 
     logger.info(`✅ Match ${matchId} started`);
     res.json({ success: true, matchId });
@@ -49,13 +42,9 @@ router.post('/stop', async (req, res) => {
       return res.status(400).json({ error: 'matchId required' });
     }
 
-    const engine = activeMatches.get(matchId);
-    if (engine) {
-      engine.stop();
-      activeMatches.delete(matchId);
-      await removeActiveMatch(matchId);
-      logger.info(`⏹️ Match ${matchId} stopped`);
-    }
+    matchManager.stopMatch(matchId);
+    await removeActiveMatch(matchId);
+    logger.info(`⏹️ Match ${matchId} stopped`);
 
     res.json({ success: true });
   } catch (error) {
@@ -70,7 +59,7 @@ router.get('/:matchId', async (req, res) => {
     const { matchId } = req.params;
 
     // Try active engine first
-    const engine = activeMatches.get(matchId);
+    const engine = matchManager.getEngine(matchId);
     if (engine) {
       return res.json({
         matchId,
@@ -98,7 +87,7 @@ router.get('/:matchId', async (req, res) => {
 
 // Get active matches
 router.get('/active/list', (req, res) => {
-  const matches = Array.from(activeMatches.keys());
+  const matches = Array.from(matchManager.activeMatches.keys());
   res.json({ matches, count: matches.length });
 });
 

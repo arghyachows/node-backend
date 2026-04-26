@@ -3,7 +3,7 @@ const logger = require('../utils/logger');
 const { generateAICommentary } = require('./aiCommentary');
 
 class MatchEngine {
-  constructor(matchId, config, io) {
+  constructor(matchId, config, io, initialState = null) {
     this.matchId = matchId;
     this.io = io;
     this.homeXI = config.homeXI;
@@ -15,24 +15,24 @@ class MatchEngine {
     this.homeTeamName = config.homeTeamName;
     this.awayTeamName = config.awayTeamName;
     this.homeBatsFirst = config.homeBatsFirst;
-    this.useAICommentary = config.useAICommentary === true; // Default to false
+    this.useAICommentary = config.useAICommentary === true;
 
-    this.innings = 1;
-    this.overNumber = 0;
-    this.ballNumber = 0;
-    this.score1 = 0;
-    this.wickets1 = 0;
-    this.score2 = 0;
-    this.wickets2 = 0;
-    this.target = 0;
-    this.matchComplete = false;
-    this.isSuperOver = false;
-    this.freeHitNext = false;
+    this.innings = initialState ? initialState.innings : 1;
+    this.overNumber = initialState ? initialState.overNumber : 0;
+    this.ballNumber = initialState ? initialState.ballNumber : 0;
+    this.score1 = initialState ? initialState.score1 : 0;
+    this.wickets1 = initialState ? initialState.wickets1 : 0;
+    this.score2 = initialState ? initialState.score2 : 0;
+    this.wickets2 = initialState ? initialState.wickets2 : 0;
+    this.target = initialState ? initialState.target : 0;
+    this.matchComplete = initialState ? initialState.matchComplete : false;
+    this.isSuperOver = initialState ? initialState.isSuperOver : false;
+    this.freeHitNext = initialState ? initialState.freeHitNext : false;
 
-    this.currentBatsmanIndex = 0;
-    this.nonStrikerIndex = 1;
-    this.nextBatsmanIndex = 2;
-    this.currentBowlerIndex = 0;
+    this.currentBatsmanIndex = initialState ? (initialState.currentBatsmanIndex || 0) : 0;
+    this.nonStrikerIndex = initialState ? (initialState.nonStrikerIndex || 1) : 1;
+    this.nextBatsmanIndex = initialState ? (initialState.nextBatsmanIndex || 2) : 2;
+    this.currentBowlerIndex = initialState ? (initialState.currentBowlerIndex || 0) : 0;
 
     this.battingOrder1 = [...(this.homeBatsFirst ? this.homeXI : this.awayXI)];
     this.bowlingOrder1 = (this.homeBatsFirst ? this.homeXI : this.awayXI).filter(
@@ -50,15 +50,31 @@ class MatchEngine {
       this.bowlingOrder2 = [...(this.homeBatsFirst ? this.awayXI : this.homeXI)];
     }
 
-    this.currentBatting = this.battingOrder1;
-    this.currentBowling = this.bowlingOrder2;
+    this.currentBatting = this.innings === 1 ? this.battingOrder1 : this.battingOrder2;
+    this.currentBowling = this.innings === 1 ? this.bowlingOrder2 : this.bowlingOrder1;
 
-    this.batsmanStats = {};
-    this.bowlerStats = {};
-    this.commentaryLog = [];
+    this.batsmanStats = initialState ? (initialState.batsmanStats || {}) : {};
+    this.bowlerStats = initialState ? (initialState.bowlerStats || {}) : {};
+    this.commentaryLog = initialState ? (initialState.commentaryLog || []) : [];
     
     this.isRunning = false;
     this.timer = null;
+  }
+
+  static fromState(state, io) {
+    const config = {
+      homeXI: state.homeXI,
+      awayXI: state.awayXI,
+      homeChemistry: state.homeChemistry,
+      awayChemistry: state.awayChemistry,
+      maxOvers: state.maxOvers,
+      pitchCondition: state.pitchCondition,
+      homeTeamName: state.homeTeamName,
+      awayTeamName: state.awayTeamName,
+      homeBatsFirst: state.homeBatsFirst,
+      useAICommentary: state.useAICommentary,
+    };
+    return new MatchEngine(state.matchId, config, io, state);
   }
 
   get isFirstInnings() {
@@ -830,6 +846,10 @@ class MatchEngine {
       matchComplete: this.matchComplete,
       isSuperOver: this.isSuperOver,
       freeHitNext: this.freeHitNext,
+      currentBatsmanIndex: this.currentBatsmanIndex,
+      nonStrikerIndex: this.nonStrikerIndex,
+      nextBatsmanIndex: this.nextBatsmanIndex,
+      currentBowlerIndex: this.currentBowlerIndex,
       batsmanStats: this.batsmanStats,
       bowlerStats: this.bowlerStats,
       commentaryLog: this.commentaryLog,
