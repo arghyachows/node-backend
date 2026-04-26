@@ -95,14 +95,10 @@ initScheduler(app);
 
 // Start server
 const PORT = parseInt(process.env.PORT || '3000', 10);
-server.listen(PORT, '0.0.0.0', async () => {
+server.listen(PORT, '0.0.0.0', () => {
   logger.info(`🚀 Server running on port ${PORT}`);
   logger.info(`📡 WebSocket server ready`);
   logger.info(`🏏 Match engine ready`);
-
-  // Recover active matches from Redis
-  const matchManager = require('./services/matchManager');
-  await matchManager.recoverMatches(io);
 });
 
 // Graceful shutdown

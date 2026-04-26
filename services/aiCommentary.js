@@ -9,9 +9,12 @@ const axios = require('axios');
  * - Timeout + fallback to templates if Ollama is slow/down
  */
 
-const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5:0.5b';
-const OLLAMA_TIMEOUT = parseInt(process.env.OLLAMA_TIMEOUT || '5000', 10);
+const { WatsonXAI } = require('@ibm-cloud/watsonx-ai');
+const { IamAuthenticator } = require('ibm-cloud-sdk-core');
+const WATSONX_PROJECT_ID = process.env.WATSONX_PROJECT_ID || '';
+const IBM_CLOUD_API_KEY = process.env.IBM_CLOUD_API_KEY || '';
+const WATSONX_URL = process.env.WATSONX_URL || 'https://us-south.ml.cloud.ibm.com';
+const WATSONX_MODEL = process.env.WATSONX_MODEL || 'meta-llama/llama-4-maverick-17b-128e-instruct-fp8';
 const AI_EVENTS = new Set(['wicket', 'six', 'four']); // Only generate AI for these
 
 // Track recently used templates to avoid repeats
@@ -47,23 +50,23 @@ async function generateAICommentary(context) {
 
   let commentary;
 
-  // Use Ollama AI for key events only when useAI is explicitly enabled
-  const shouldCallAI = context.useAI !== false && AI_EVENTS.has(eventType);
+  // Use WatsonX AI for key events only when useAI is explicitly enabled
+  const shouldCallAI = context.useAI !== false && AI_EVENTS.has(eventType) && IBM_CLOUD_API_KEY && WATSONX_PROJECT_ID;
   if (shouldCallAI) {
-    logger.info(`[AI Commentary] Calling Ollama for ${eventType} | ${OLLAMA_MODEL} | useAI=${context.useAI}`);
+    logger.info(`[AI Commentary] Calling WatsonX for ${eventType} | ${WATSONX_MODEL} | useAI=${context.useAI}`);
     try {
-      commentary = await generateOllamaCommentary(context);
+      commentary = await generateWatsonxCommentary(context);
       if (commentary) {
-        logger.info(`[AI Commentary] ✓ Ollama generated: "${commentary.substring(0, 60)}..."`);
+        logger.info(`[AI Commentary] ✓ WatsonX generated: "${commentary.substring(0, 60)}..."`);
       } else {
-        logger.info(`[AI Commentary] ✗ Ollama returned empty/invalid — using template`);
+        logger.info(`[AI Commentary] ✗ WatsonX returned empty/invalid — using template`);
       }
     } catch (err) {
-      logger.info(`[AI Commentary] ✗ Ollama failed: ${err.message} — using template`);
+      logger.info(`[AI Commentary] ✗ WatsonX failed: ${err.message} — using template`);
       commentary = null;
     }
   } else {
-    logger.info(`[AI Commentary] Template mode | event=${eventType} | useAI=${context.useAI}`);
+    logger.info(`[AI Commentary] Template mode | event=${eventType} | useAI=${context.useAI} | hasKey=${!!IBM_CLOUD_API_KEY}`);
   }
 
   // Always generate fresh template commentary (no caching — ensures uniqueness)
@@ -74,12 +77,13 @@ async function generateAICommentary(context) {
   return commentary;
 }
 
-// ─── Ollama AI Commentary ──────────────────────────────────────────
+// ─── WatsonX AI Commentary ─────────────────────────────────────────
 
-async function generateOllamaCommentary(context) {
+async function generateWatsonxCommentary(context) {
   const { eventType, batsmanName, bowlerName, fielderName, wicketType, innings,
-    overNumber, ballNumber, currentScore, currentWickets, target, isSuperOver } = context;
+    overNumber, ballNumber, currentScore, currentWickets, target, isSuperOver, isFreeHit } = context;
 
+  const situation = getSituation(context);
   const chaseInfo = innings === 2 && target > 0
     ? ` Chasing ${target + 1}, currently ${currentScore}/${currentWickets}.`
     : ` Score: ${currentScore}/${currentWickets}.`;
@@ -105,53 +109,62 @@ async function generateOllamaCommentary(context) {
 ${overInfo}.${chaseInfo} ${eventDesc}
 Commentary:`;
 
-  try {
-    const response = await axios.post(`${OLLAMA_URL}/api/generate`, {
-      model: OLLAMA_MODEL,
-      prompt: prompt,
-      stream: false,
-      options: {
-        num_predict: 50,
-        temperature: 0.7,
-        stop: ["Commentary:", "\n", "<|", "Note:"]
-      }
-    }, {
-      timeout: OLLAMA_TIMEOUT,
-      headers: process.env.OLLAMA_API_KEY ? {
-        'Authorization': `Bearer ${process.env.OLLAMA_API_KEY}`,
-        'Content-Type': 'application/json'
-      } : {
-        'Content-Type': 'application/json'
-      }
-    });
+  const watsonxAIService = WatsonXAI.newInstance({
+    version: '2023-05-29',
+    serviceUrl: WATSONX_URL,
+    authenticator: new IamAuthenticator({
+      apikey: IBM_CLOUD_API_KEY,
+    }),
+  });
 
-    let text = response.data.response || '';
-    text = text.trim();
-
-    // Clean LLM artifacts
-    text = text
-      .replace(/<\|.*?\|>/g, '')
-      .replace(/<.*?>/g, '')
-      .replace(/\*\*/g, '')
-      .replace(/^\s*["'`]+|["'`]+\s*$/g, '')
-      .replace(/here'?s?\s*(the|a|your)?\s*commentary.*/gi, '')
-      .replace(/commentary\s*:/gi, '')
-      .split('\n')[0]
-      .trim();
-
-    if (text && !/[.!?]$/.test(text)) {
-      text += '!';
+  const response = await watsonxAIService.generateText({
+    modelId: WATSONX_MODEL,
+    projectId: WATSONX_PROJECT_ID,
+    input: prompt,
+    parameters: {
+      max_new_tokens: 40,
+      temperature: 0.7,
+      repetition_penalty: 1.1,
+      stop_sequences: ['Commentary:', '<|', 'Note:', 'Reply'],
     }
+  });
 
-    if (!text || text.length < 5 || text.length > 200) {
-      return null;
-    }
+  let rawText = response.result.results[0].generated_text || '';
+  let text = rawText.trim();
 
-    return text;
-  } catch (err) {
-    logger.error(`[AI Commentary] Ollama request failed: ${err.message}`);
-    return null;
+  // ── Clean LLM artifacts ──
+  // Strip common LLM junk: quotes, markdown, meta-text, special tokens
+  text = text
+    .replace(/<\|.*?\|>/g, '')              // <|end_of_text|>, <|eot_id|>, etc.
+    .replace(/<end of text>/gi, '')
+    .replace(/<lend of text>/gi, '')
+    .replace(/```[\s\S]*?```/g, '')         // code blocks
+    .replace(/\*\*/g, '')                    // bold markdown
+    .replace(/^\s*["'`]+|["'`]+\s*$/g, '')  // surrounding quotes
+    .replace(/^\s*[-–—•]\s*/g, '')          // bullet points
+    .replace(/\d+\s*min\s*read/gi, '')      // "2 min read"
+    .replace(/i changed.*?for you/gi, '')   // "I changed it for you"
+    .replace(/here'?s?\s*(the|a|your)?\s*commentary.*/gi, '') // "Here's the commentary:"
+    .replace(/commentary\s*:/gi, '')        // leftover "Commentary:"
+    .replace(/reply\s*:/gi, '')
+    .replace(/note\s*:/gi, '')
+    .replace(/\n[\s\S]*/g, '')                   // everything after first newline
+    .trim();
+
+  if (!text && rawText.trim()) {
+    logger.debug(`[AI Commentary] Raw output exists but was cleaned to empty: "${rawText}"`);
   }
+
+  // Add back trailing punctuation if stripped by stop_sequences
+  if (text && !/[.!?]$/.test(text)) {
+    text += '!';
+  }
+
+  if (!text || text.length < 5 || text.length > 200) {
+    return null; // Bad response, fall back to template
+  }
+
+  return text;
 }
 
 // ─── Situation helper ─────────────────────────────────────────────
