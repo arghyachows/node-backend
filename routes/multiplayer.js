@@ -28,38 +28,28 @@ function mapPlayer(sp) {
   };
 }
 
-// Helper function to load team XI (from Cloudflare Worker logic)
+// Helper function to load team XI (Modernized to use lineup_players)
 async function loadTeamXI(teamId) {
   try {
-    const { data, error } = await supabase
+    const { data: team, error: teamError } = await supabase
       .from('teams')
-      .select('*, squads(*, squad_players(*, user_cards(*, player_cards(*))))')
+      .select('id, squads(id, is_active)')
       .eq('id', teamId)
       .single();
 
-    if (error || !data) {
-      logger.error(`Failed to fetch team ${teamId}:`, error);
+    if (teamError || !team) {
+      logger.error(`Failed to fetch team ${teamId}:`, teamError);
       return null;
     }
 
-    const squads = data.squads || [];
+    const squads = team.squads || [];
     const squad = squads.find(s => s.is_active) || squads[0];
-    
     if (!squad) {
       logger.error(`No squad found for team ${teamId}`);
       return null;
     }
 
-    const players = (squad.squad_players || [])
-      .filter(sp => sp.is_playing_xi)
-      .sort((a, b) => (a.batting_order || 0) - (b.batting_order || 0));
-
-    if (players.length === 0) {
-      logger.error(`No playing XI found for team ${teamId}`);
-      return null;
-    }
-
-    return players.slice(0, 11).map(sp => mapPlayer(sp));
+    return await loadSquadXI(squad.id);
   } catch (error) {
     logger.error(`Error loading team ${teamId}:`, error);
     return null;
@@ -300,39 +290,48 @@ router.post('/start', async (req, res) => {
     let homeXI = config.homeXI;
     let awayXI = config.awayXI;
 
-    // If XI not provided, fetch from database
-    if (!homeXI || !awayXI) {
-      const { data: matchData, error: matchError } = await supabase
-        .from('multiplayer_matches')
-        .select('home_team_id, away_team_id, home_user_id, away_user_id')
-        .eq('id', matchId)
-        .single();
-
-      if (matchError || !matchData) {
-        logger.error('Failed to fetch match:', matchError);
-        return res.status(500).json({ error: 'Match not found' });
+    // Try multiple approaches to load teams
+    if (!homeXI) {
+      if (config.homeSquadId) {
+        logger.info(`Loading home squad directly: ${config.homeSquadId}`);
+        homeXI = await loadSquadXI(config.homeSquadId);
       }
-
-      // Try multiple approaches to load teams
-      homeXI = await loadTeamXI(matchData.home_team_id);
-      awayXI = await loadTeamXI(matchData.away_team_id);
-
+      
       if (!homeXI) {
-        logger.info(`Trying home_team_id as squad_id: ${matchData.home_team_id}`);
-        homeXI = await loadSquadXI(matchData.home_team_id);
+        const { data: matchData } = await supabase
+          .from('multiplayer_matches')
+          .select('home_team_id, home_user_id')
+          .eq('id', matchId)
+          .single();
+
+        if (matchData) {
+          homeXI = await loadTeamXI(matchData.home_team_id);
+          if (!homeXI && matchData.home_user_id) {
+            homeXI = await loadUserActiveSquad(matchData.home_user_id);
+          }
+        }
       }
-      if (!awayXI) {
-        logger.info(`Trying away_team_id as squad_id: ${matchData.away_team_id}`);
-        awayXI = await loadSquadXI(matchData.away_team_id);
+    }
+
+    if (!awayXI) {
+      if (config.awaySquadId) {
+        logger.info(`Loading away squad directly: ${config.awaySquadId}`);
+        awayXI = await loadSquadXI(config.awaySquadId);
       }
 
-      if (!homeXI && matchData.home_user_id) {
-        logger.info(`Loading home user's active squad: ${matchData.home_user_id}`);
-        homeXI = await loadUserActiveSquad(matchData.home_user_id);
-      }
-      if (!awayXI && matchData.away_user_id) {
-        logger.info(`Loading away user's active squad: ${matchData.away_user_id}`);
-        awayXI = await loadUserActiveSquad(matchData.away_user_id);
+      if (!awayXI) {
+        const { data: matchData } = await supabase
+          .from('multiplayer_matches')
+          .select('away_team_id, away_user_id')
+          .eq('id', matchId)
+          .single();
+
+        if (matchData) {
+          awayXI = await loadTeamXI(matchData.away_team_id);
+          if (!awayXI && matchData.away_user_id) {
+            awayXI = await loadUserActiveSquad(matchData.away_user_id);
+          }
+        }
       }
     }
 
