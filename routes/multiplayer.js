@@ -25,6 +25,11 @@ function mapPlayer(sp) {
     batting,
     bowling,
     fielding: pc?.fielding || 50,
+    isWicketKeeper: sp.is_wicket_keeper === true,
+    isBowler1: sp.is_bowler_1 === true,
+    isBowler2: sp.is_bowler_2 === true,
+    isCaptain: sp.is_captain === true,
+    isViceCaptain: sp.is_vice_captain === true,
   };
 }
 

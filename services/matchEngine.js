@@ -35,20 +35,25 @@ class MatchEngine {
     this.currentBowlerIndex = 0;
 
     this.battingOrder1 = [...(this.homeBatsFirst ? this.homeXI : this.awayXI)];
-    this.bowlingOrder1 = (this.homeBatsFirst ? this.homeXI : this.awayXI).filter(
-      p => p.role === 'bowler' || p.role === 'all_rounder'
-    );
-    if (this.bowlingOrder1.length === 0) {
-      this.bowlingOrder1 = [...(this.homeBatsFirst ? this.homeXI : this.awayXI)];
-    }
+    
+    const getBowlingOrder = (xi) => {
+      let bowlers = xi.filter(p => p.role === 'bowler' || p.role === 'all_rounder');
+      if (bowlers.length === 0) bowlers = [...xi];
+      
+      // Sort so isBowler1 is first, isBowler2 is second
+      bowlers.sort((a, b) => {
+        if (a.isBowler1) return -1;
+        if (b.isBowler1) return 1;
+        if (a.isBowler2) return -1;
+        if (b.isBowler2) return 1;
+        return 0;
+      });
+      return bowlers;
+    };
 
+    this.bowlingOrder1 = getBowlingOrder(this.homeBatsFirst ? this.homeXI : this.awayXI);
     this.battingOrder2 = [...(this.homeBatsFirst ? this.awayXI : this.homeXI)];
-    this.bowlingOrder2 = (this.homeBatsFirst ? this.awayXI : this.homeXI).filter(
-      p => p.role === 'bowler' || p.role === 'all_rounder'
-    );
-    if (this.bowlingOrder2.length === 0) {
-      this.bowlingOrder2 = [...(this.homeBatsFirst ? this.awayXI : this.homeXI)];
-    }
+    this.bowlingOrder2 = getBowlingOrder(this.homeBatsFirst ? this.awayXI : this.homeXI);
 
     this.currentBatting = this.battingOrder1;
     this.currentBowling = this.bowlingOrder2;
