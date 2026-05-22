@@ -46,8 +46,10 @@ jobs:
       # ─── Set context for cluster ─────────────────────
       - name: Configure kubectl for IKS cluster
         run: |
-          ibmcloud ks cluster config --cluster $CLUSTER_NAME
-          kubectl cluster-info
+          # The --export flag outputs the KUBECONFIG env var to set
+          eval $(ibmcloud ks cluster config --cluster $CLUSTER_NAME --export)
+          echo "KUBECONFIG=$KUBECONFIG"
+          kubectl get nodes
           echo "✅ kubectl configured for cluster: $CLUSTER_NAME"
 
       # ─── Build and push Docker image ──────────────────
