@@ -37,6 +37,11 @@ jobs:
           ibmcloud target -g Default
           echo "✅ Logged into IBM Cloud"
 
+      # ─── Install Container Registry plugin ─────────────
+      - name: Install IBM Container Registry plugin
+        run: |
+          ibmcloud plugin install container-registry -r "IBM Cloud"
+
       # ─── Login to Container Registry ─────────────────
       - name: Login to IBM Container Registry
         run: |
