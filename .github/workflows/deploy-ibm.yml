@@ -54,13 +54,13 @@ jobs:
       - name: Configure kubectl for IKS cluster
         run: |
           # Generate kubeconfig for the cluster
-          ibmcloud ks cluster config --cluster $CLUSTER_NAME --file $KUBECONFIG_FILE
+          ibmcloud ks cluster config --cluster $CLUSTER_NAME --output yaml > $KUBECONFIG_FILE
           
           # Set the KUBECONFIG environment variable
           echo "KUBECONFIG=$KUBECONFIG_FILE" >> $GITHUB_ENV
           
           # Verify kubectl works
-          kubectl get nodes --insecure-skip-tls-verify || true
+          kubectl get nodes --kubeconfig=$KUBECONFIG_FILE
           echo "✅ kubectl configured for cluster: $CLUSTER_NAME"
 
       # ─── Build and push Docker image ──────────────────
