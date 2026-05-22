@@ -68,8 +68,8 @@ jobs:
           context: .
           push: true
           tags: |
-            us.icr.io/$REGISTRY_NAMESPACE/cricket-backend:${{ github.sha }}
-            us.icr.io/$REGISTRY_NAMESPACE/cricket-backend:latest
+            us.icr.io/${{ env.REGISTRY_NAMESPACE }}/cricket-backend:${{ github.sha }}
+            us.icr.io/${{ env.REGISTRY_NAMESPACE }}/cricket-backend:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
@@ -81,7 +81,7 @@ jobs:
           cd k8s
           
           # Update the image tag in deployment
-          sed -i "s|image: us.icr.io/$REGISTRY_NAMESPACE/cricket-backend:.*|image: us.icr.io/$REGISTRY_NAMESPACE/cricket-backend:${{ github.sha }}|" deployment.yaml
+          sed -i "s|image: us.icr.io/${{ env.REGISTRY_NAMESPACE }}/cricket-backend:.*|image: us.icr.io/${{ env.REGISTRY_NAMESPACE }}/cricket-backend:${{ github.sha }}|" deployment.yaml
           
           # Apply all manifests
           echo "📦 Applying Kubernetes manifests..."
