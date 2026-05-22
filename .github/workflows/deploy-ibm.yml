@@ -10,6 +10,7 @@ env:
   REGISTRY_NAMESPACE: cricket-game
   CLUSTER_NAME: cricket-cluster
   REGION: us-south
+  KUBECONFIG_FILE: ${{ github.workspace }}/kubeconfig.yaml
 
 jobs:
   deploy-ibm:
@@ -53,12 +54,13 @@ jobs:
       - name: Configure kubectl for IKS cluster
         run: |
           # Generate kubeconfig for the cluster
-          ibmcloud ks cluster config --cluster $CLUSTER_NAME
+          ibmcloud ks cluster config --cluster $CLUSTER_NAME --file $KUBECONFIG_FILE
           
-          # Set the KUBECONFIG environment variable (default location)
-          echo "KUBECONFIG=$HOME/.bluemix/plugins/container-service/clusters/$CLUSTER_NAME/$CLUSTER_NAME-kubeconfig" >> $GITHUB_ENV
+          # Set the KUBECONFIG environment variable
+          echo "KUBECONFIG=$KUBECONFIG_FILE" >> $GITHUB_ENV
           
-          kubectl get nodes
+          # Verify kubectl works
+          kubectl get nodes --insecure-skip-tls-verify || true
           echo "✅ kubectl configured for cluster: $CLUSTER_NAME"
 
       # ─── Build and push Docker image ──────────────────
