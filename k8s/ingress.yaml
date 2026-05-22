@@ -16,10 +16,10 @@ metadata:
 spec:
   tls:
     - hosts:
-        - api.cricket-game.example.com
+        - cricket-cluster-5e896152da3455c837a30996c4d7aabb-0000.us-south.containers.appdomain.cloud
       secretName: cricket-backend-tls
   rules:
-    - host: api.cricket-game.example.com
+    - host: cricket-cluster-5e896152da3455c837a30996c4d7aabb-0000.us-south.containers.appdomain.cloud
       http:
         paths:
           - path: /
