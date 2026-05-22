@@ -1,14 +1,25 @@
 const Redis = require('ioredis');
 const logger = require('../utils/logger');
 
-// Parse REDIS_URL to extract credentials explicitly.
+// Support both REDIS_URL (full URL) and individual components (for Kubernetes)
 // Railway Redis URLs follow the format: redis://:password@host:port
 // ioredis can sometimes fail to apply auth from the URL alone, so we
 // extract the password and pass it as a discrete option to guarantee
 // AUTH is sent on every (re)connection.
-const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-const parsedUrl = new URL(redisUrl);
-const redisPassword = parsedUrl.password || undefined;
+let redisUrl, redisPassword;
+
+if (process.env.REDIS_URL) {
+  redisUrl = process.env.REDIS_URL;
+  const parsedUrl = new URL(redisUrl);
+  redisPassword = parsedUrl.password || undefined;
+} else {
+  // Build URL from individual components (Kubernetes)
+  const host = process.env.REDIS_HOST || 'localhost';
+  const port = process.env.REDIS_PORT || '6379';
+  const password = process.env.REDIS_PASSWORD || '';
+  redisPassword = password || undefined;
+  redisUrl = `redis://${host}:${port}`;
+}
 
 const redis = new Redis(redisUrl, {
   password: redisPassword,

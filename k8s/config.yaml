@@ -1,0 +1,29 @@
+# ─── Secrets (DO NOT COMMIT — use sealed secrets or external secrets in prod) ───
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cricket-backend-secrets
+  namespace: cricket-game
+type: Opaque
+stringData:
+  SUPABASE_URL: "https://kollxlzqqgznfiutpqjz.supabase.co"
+  SUPABASE_SERVICE_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtvbGx4bHpxcWd6bmZpdXRwcWp6Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MzMzNjgwNSwiZXhwIjoyMDg4OTEyODA1fQ.5Cl9l5hi1ijpTJCoo4z51BXmEngVnEYbqVjLtxveviU"
+  IBM_CLOUD_API_KEY: "HwaE4u46gv3j6KVf7WccN0ekvh3_9aoN1GW_C4wOWOMO"
+  WATSONX_PROJECT_ID: "d3a67f16-c80e-4d96-96fa-4b3f97fc3191"
+  REDIS_PASSWORD: "Roller@123"
+---
+# ─── ConfigMap ───
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cricket-backend-config
+  namespace: cricket-game
+data:
+  NODE_ENV: "production"
+  PORT: "3000"
+  REDIS_HOST: "cricket-redis-service"
+  REDIS_PORT: "6379"
+  WATSONX_URL: "https://us-south.ml.cloud.ibm.com"
+  WATSONX_MODEL: "meta-llama/llama-4-maverick-17b-128e-instruct-fp8"
+  CORS_ORIGIN: "*"
+  LOG_LEVEL: "info"

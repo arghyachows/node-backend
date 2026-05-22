@@ -1,0 +1,133 @@
+name: Deploy to IBM Cloud
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+env:
+  IBM_CLOUD_API_KEY: ${{ secrets.IBM_CLOUD_API_KEY }}
+  REGISTRY_NAMESPACE: cricket-game
+  CLUSTER_NAME: cricket-cluster
+  REGION: us-south
+
+jobs:
+  deploy-ibm:
+    name: 🏗️ Deploy to IBM Cloud
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ─── Setup Docker Buildx ───────────────────────────
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ─── Install IBM Cloud CLI ───────────────────────
+      - name: Install IBM Cloud CLI
+        run: |
+          curl -fsSL https://clis.cloud.ibm.com/install/linux | sh
+          ibmcloud --version
+
+      # ─── Login to IBM Cloud ───────────────────────────
+      - name: Login to IBM Cloud
+        run: |
+          ibmcloud login --apikey "$IBM_CLOUD_API_KEY" -r $REGION
+          ibmcloud target -g Default
+          echo "✅ Logged into IBM Cloud"
+
+      # ─── Login to Container Registry ─────────────────
+      - name: Login to IBM Container Registry
+        run: |
+          ibmcloud cr login
+          echo "✅ Logged into Container Registry"
+
+      # ─── Set context for cluster ─────────────────────
+      - name: Configure kubectl for IKS cluster
+        run: |
+          ibmcloud ks cluster config --cluster $CLUSTER_NAME
+          kubectl cluster-info
+          echo "✅ kubectl configured for cluster: $CLUSTER_NAME"
+
+      # ─── Build and push Docker image ──────────────────
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            us.icr.io/$REGISTRY_NAMESPACE/cricket-backend:${{ github.sha }}
+            us.icr.io/$REGISTRY_NAMESPACE/cricket-backend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            NODE_ENV=production
+
+      # ─── Update deployment with new image ────────────
+      - name: Update Kubernetes deployment
+        run: |
+          cd k8s
+          
+          # Update the image tag in deployment
+          sed -i "s|image: us.icr.io/$REGISTRY_NAMESPACE/cricket-backend:.*|image: us.icr.io/$REGISTRY_NAMESPACE/cricket-backend:${{ github.sha }}|" deployment.yaml
+          
+          # Apply all manifests
+          echo "📦 Applying Kubernetes manifests..."
+          kubectl apply -f config.yaml -n cricket-game
+          kubectl apply -f redis.yaml -n cricket-game
+          kubectl apply -f deployment.yaml -n cricket-game
+          kubectl apply -f service.yaml -n cricket-game
+          kubectl apply -f ingress.yaml -n cricket-game
+          
+          echo "✅ Kubernetes manifests applied"
+
+      # ─── Wait for rollout ─────────────────────────────
+      - name: Wait for deployment rollout
+        run: |
+          echo "⏳ Waiting for rollout to complete..."
+          kubectl rollout status deployment/cricket-backend -n cricket-game --timeout=300s
+          echo "✅ Rollout complete"
+
+      # ─── Health check ────────────────────────────────
+      - name: Health check
+        run: |
+          echo "🏥 Running health check..."
+          INGRESS_IP=$(kubectl get ingress cricket-backend-ingress -n cricket-game -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          echo "Ingress IP: $INGRESS_IP"
+          
+          for i in {1..15}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://$INGRESS_IP/health" 2>/dev/null || echo "000")
+            if [ "$STATUS" = "200" ]; then
+              echo "✅ Health check passed!"
+              curl -s "http://$INGRESS_IP/health" | jq .
+              exit 0
+            fi
+            echo "Attempt $i: got $STATUS, retrying in 10s..."
+            sleep 10
+          done
+          echo "⚠️ Health check timed out, but deployment may still be starting"
+          kubectl get pods -n cricket-game
+          kubectl logs -l app=cricket-backend -n cricket-game --tail=20
+
+      # ─── Summary ─────────────────────────────────────
+      - name: Deployment summary
+        if: always()
+        run: |
+          echo ""
+          echo "═══════════════════════════════════════"
+          echo "       DEPLOYMENT SUMMARY"
+          echo "═══════════════════════════════════════"
+          echo "📅 Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "🔨 Commit: ${{ github.sha }}"
+          echo "👤 Author: ${{ github.actor }}"
+          echo ""
+          echo "📦 Pods:"
+          kubectl get pods -n cricket-game -o wide
+          echo ""
+          echo "🌐 Services:"
+          kubectl get svc -n cricket-game
+          echo ""
+          echo "🔗 Ingress:"
+          kubectl get ingress -n cricket-game
+          echo "═══════════════════════════════════════"
