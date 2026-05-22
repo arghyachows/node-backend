@@ -55,12 +55,8 @@ jobs:
           # Generate kubeconfig for the cluster
           ibmcloud ks cluster config --cluster $CLUSTER_NAME
           
-          # Find the generated kubeconfig file
-          KUBECONFIG_FILE=$(ibmcloud ks cluster config --cluster $CLUSTER_NAME --output json | jq -r '.[0].kubeconfigs[0].path')
-          echo "Kubeconfig file: $KUBECONFIG_FILE"
-          
-          # Set the KUBECONFIG environment variable
-          echo "KUBECONFIG=$KUBECONFIG_FILE" >> $GITHUB_ENV
+          # Set the KUBECONFIG environment variable (default location)
+          echo "KUBECONFIG=$HOME/.bluemix/plugins/container-service/clusters/$CLUSTER_NAME/$CLUSTER_NAME-kubeconfig" >> $GITHUB_ENV
           
           kubectl get nodes
           echo "✅ kubectl configured for cluster: $CLUSTER_NAME"
