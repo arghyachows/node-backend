@@ -532,7 +532,7 @@ class MatchEngine {
     const bowlAccuracy   = bowler.accuracy     ?? bowlingRating;
     const bowlVariations = bowler.variations   ?? bowlingRating;
     const bowlSpin       = bowler.spin         ?? bowlingRating;
-    const bowl Yorkers   = bowler.yorkers       ?? bowlingRating;
+    const bowlYorkers    = bowler.yorkers      ?? bowlingRating;
     const bowlBouncer    = bowler.bouncer       ?? bowlingRating;
 
     // Base probability distribution

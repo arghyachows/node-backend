@@ -1,0 +1,66 @@
+# Service to expose Netdata dashboard
+# Run: kubectl apply -f netdata-service.yaml -n cricket-game
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: cricket-backend-netdata
+  namespace: cricket-game
+  labels:
+    app: cricket-backend
+    component: monitoring
+spec:
+  type: ClusterIP
+  ports:
+    - port: 19999
+      targetPort: 19999
+      protocol: TCP
+      name: netdata
+  selector:
+    app: cricket-backend
+
+---
+# Ingress for Netdata (optional - for external access)
+# Run: kubectl apply -f netdata-ingress.yaml -n cricket-game
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cricket-netdata-ingress
+  namespace: cricket-game
+  labels:
+    app: cricket-backend
+    component: monitoring
+  annotations:
+    nginx.ingress.kubernetes.io/auth-type: basic
+    nginx.ingress.kubernetes.io/auth-secret: netdata-auth
+    nginx.ingress.kubernetes.io/limit-rps: "30"
+    nginx.ingress.kubernetes.io/limit-connections: "10"
+spec:
+  ingressClassName: public-iks-k8s-nginx
+  rules:
+    - host: netdata.cricket-cluster-5e896152da3455c837a30996c4d7aabb-0000.us-south.containers.appdomain.cloud
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: cricket-backend-netdata
+                port:
+                  number: 19999
+  tls:
+    - hosts:
+        - netdata.cricket-cluster-5e896152da3455c837a30996c4d7aabb-0000.us-south.containers.appdomain.cloud
+
+---
+# Basic auth secret for Netdata (create with: htpasswd -c auth netdata_user)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: netdata-auth
+  namespace: cricket-game
+type: Opaque
+stringData:
+  auth: |2
+    netdata_user:$apr1$H6uskkkW$Ig.iLPBiPvPLZEWvQxfbf.

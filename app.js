@@ -63,6 +63,61 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Prometheus metrics endpoint for Netdata
+app.get('/metrics', (req, res) => {
+  const memUsage = process.memoryUsage();
+  const cpuUsage = process.cpuUsage();
+  
+  const metrics = `
+# HELP nodejs_app_info Node.js application info
+# TYPE nodejs_app_info gauge
+nodejs_app_info{version="1.0.0"} 1
+
+# HELP nodejs_memory_heap_used_bytes Node.js heap used bytes
+# TYPE nodejs_memory_heap_used_bytes gauge
+nodejs_memory_heap_used_bytes ${memUsage.heapUsed}
+
+# HELP nodejs_memory_heap_total_bytes Node.js heap total bytes
+# TYPE nodejs_memory_heap_total_bytes gauge
+nodejs_memory_heap_total_bytes ${memUsage.heapTotal}
+
+# HELP nodejs_memory_rss_bytes Node.js RSS bytes
+# TYPE nodejs_memory_rss_bytes gauge
+nodejs_memory_rss_bytes ${memUsage.rss}
+
+# HELP nodejs_external_bytes Node.js external memory bytes
+# TYPE nodejs_external_bytes gauge
+nodejs_external_bytes ${memUsage.external}
+
+# HELP nodejs_cpu_user_seconds_total Node.js CPU user seconds
+# TYPE nodejs_cpu_user_seconds_total counter
+nodejs_cpu_user_seconds_total ${cpuUsage.user}
+
+# HELP nodejs_cpu_system_seconds_total Node.js CPU system seconds
+# TYPE nodejs_cpu_system_seconds_total counter
+nodejs_cpu_system_seconds_total ${cpuUsage.system}
+
+# HELP nodejs_active_handles_total Node.js active handles
+# TYPE nodejs_active_handles_total gauge
+nodejs_active_handles_total ${Object.keys(process._getActiveHandles()).length}
+
+# HELP nodejs_active_requests_total Node.js active requests
+# TYPE nodejs_active_requests_total gauge
+nodejs_active_requests_total ${Object.keys(process._getActiveRequests()).length}
+
+# HELP cricket_api_requests_total Total API requests
+# TYPE cricket_api_requests_total counter
+cricket_api_requests_total{method="${req.method}",path="${req.path}"} 1
+
+# HELP cricket_uptime_seconds Application uptime in seconds
+# TYPE cricket_uptime_seconds gauge
+cricket_uptime_seconds ${process.uptime()}
+`.trim();
+
+  res.set('Content-Type', 'text/plain');
+  res.send(metrics);
+});
+
 // Test endpoint for browser
 app.get('/test', (req, res) => {
   logger.info(`🧪 Test endpoint hit from ${req.ip}`);

@@ -1,0 +1,121 @@
+# ConfigMap for Netdata monitoring
+# Run: kubectl apply -f netdata-config.yaml -n cricket-game
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: netdata-config
+  namespace: cricket-game
+  labels:
+    app: cricket-backend
+    component: monitoring
+data:
+  netdata.conf: |
+    [global]
+      run as user = netdata
+      web files owner = root
+      web files group = root
+      bind socket to IP = 0.0.0.0
+      default port = 19999
+      update every = 5
+      history = 3600
+      memory mode = ram
+      page cache size = 32
+      dbengine multihost disk space = 256
+      
+    [web]
+      web files directory = /var/lib/netdata/www
+      enable gzip compression = yes
+      gzip compression level = 3
+      
+    [plugins]
+      enable running new plugins = yes
+      check for new plugins every = 60
+      python.d = yes
+      node.d = yes
+      go.d = yes
+      charts.d = yes
+      apps = yes
+      proc = yes
+      diskspace = yes
+      cgroups = yes
+      tc = no
+      idlejitter = no
+      
+    [plugin:proc]
+      /proc/net/stat/nfsclient = yes
+      /proc/net/rpc/nfs = yes
+      /proc/net/rpc/nfsd = yes
+      /proc/interrupts = yes
+      /proc/softirqs = yes
+      /proc/loadavg = yes
+      /proc/stat = yes
+      /proc/meminfo = yes
+      /proc/uptime = yes
+      /proc/sys/kernel/random/entropy_avail = yes
+
+  python.d.conf: |
+    modules:
+      prometheus: no
+      go.d: yes
+      nginx: no
+      apache: no
+      mysql: no
+      postgres: no
+      redis: yes
+      phpfpm: no
+      haproxy: no
+      mongodb: no
+      elasticsearch: no
+      httpcheck: no
+      portcheck: no
+      dns_query_time: no
+      thermals: yes
+      sensors: yes
+      cpufreq: yes
+      retrospector: no
+
+  node.d.conf: |
+    modules:
+      named: no
+      stiebel: no
+      snmp: no
+      squeezelite: no
+      hddtemp: no
+      freenas: no
+      loadbcm: no
+      powersupply: no
+
+  go.d.conf: |
+    modules:
+      prometheus: yes
+      docker: yes
+      kubernetes: yes
+      nginx: no
+      apache: no
+      mysql: no
+      postgres: no
+      redis: yes
+      mongodb: no
+      elasticsearch: no
+      consul: no
+      cockroachdb: no
+      etcd: no
+      harbor: no
+      portcheck: no
+      ping: no
+      powerdns: no
+      unbound: no
+      vernemq: no
+      wmi: no
+      x509check: no
+      scaleio: no
+      spigotmc: no
+      springboot2: no
+      tomcat: no
+
+  prometheus.conf: |
+    jobs:
+      - name: cricket-backend
+        url: http://localhost:3000/metrics
+        update_every: 5
