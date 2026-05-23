@@ -518,124 +518,217 @@ class MatchEngine {
   }
 
   calculateOutcome(battingRating, bowlingRating, chemistry, batsman, bowler) {
+    // Extract all player attributes with defaults
+    const batAggression  = batsman.aggression  ?? battingRating;
+    const batTechnique   = batsman.technique   ?? battingRating;
+    const batPower       = batsman.power       ?? battingRating;
+    const batConsistency = batsman.consistency ?? battingRating;
+    const batStamina     = batsman.stamina     ?? battingRating;
+    const batTemperament= batsman.temperament ?? battingRating;
+    const batShotMaking  = batsman.shot_making ?? battingRating;
+    const batRunning     = batsman.running     ?? battingRating;
+
+    const bowlPace       = bowler.pace         ?? bowlingRating;
+    const bowlAccuracy   = bowler.accuracy     ?? bowlingRating;
+    const bowlVariations = bowler.variations   ?? bowlingRating;
+    const bowlSpin       = bowler.spin         ?? bowlingRating;
+    const bowl Yorkers   = bowler.yorkers       ?? bowlingRating;
+    const bowlBouncer    = bowler.bouncer       ?? bowlingRating;
+
+    // Base probability distribution
     let probs = {
-      dot: 0.30, single: 0.30, double: 0.10, triple: 0.02,
-      four: 0.15, six: 0.08, wicket: 0.05, wide: 0.015, no_ball: 0.015,
+      dot: 0.28, single: 0.28, double: 0.10, triple: 0.02,
+      four: 0.15, six: 0.08, wicket: 0.06, wide: 0.015, no_ball: 0.015,
     };
 
+    // ── 1. BATSMAN vs BOWLER MATCHUP (biggest factor) ──────────────────────────
     const matchupScore = battingRating - bowlingRating;
-    const normalized = matchupScore / 100;
+    const matchupNorm  = matchupScore / 100; // -1 to +1 roughly
 
-    probs.four += 0.1 * normalized;
-    probs.six += 0.08 * normalized;
-    probs.dot -= 0.1 * normalized;
-    probs.wicket -= 0.05 * normalized;
-    probs.single += 0.03 * normalized;
+    // Batting advantage → more boundaries, fewer wickets
+    probs.four   += 0.12 * matchupNorm;
+    probs.six    += 0.09 * matchupNorm;
+    probs.dot    -= 0.10 * matchupNorm;
+    probs.wicket -= 0.06 * matchupNorm;
+    probs.single += 0.03 * matchupNorm;
 
-    const aggression = batsman.aggression ?? battingRating;
-    const technique = batsman.technique ?? battingRating;
-    const power = batsman.power ?? battingRating;
-    const consistency = batsman.consistency ?? battingRating;
-    const pace = bowler.pace ?? bowlingRating;
-    const accuracy = bowler.accuracy ?? bowlingRating;
-    const variations = bowler.variations ?? bowlingRating;
-
-    probs.six += aggression * 0.001;
-    probs.wicket += aggression * 0.0005;
-    probs.dot -= aggression * 0.0008;
-    probs.six += power * 0.0008;
-    probs.four += power * 0.0006;
-    probs.single += technique * 0.0005;
-    probs.double += technique * 0.0003;
-    probs.wicket -= technique * 0.0004;
-    probs.dot += consistency * 0.0003;
-    probs.wicket -= consistency * 0.0005;
-    probs.dot += accuracy * 0.001;
-    probs.wicket += accuracy * 0.0007;
-    probs.wide -= accuracy * 0.0003;
-    probs.no_ball -= accuracy * 0.0002;
-    probs.wicket += pace * 0.0005;
-    probs.dot += pace * 0.0003;
-    probs.wicket += variations * 0.0003;
-    probs.dot += variations * 0.0002;
-
-    const powerplayEnd = Math.min(10, Math.floor(this.maxOvers * 0.3));
-    const middleOversEnd = Math.floor(this.maxOvers * 0.8);
-
-    if (this.overNumber >= middleOversEnd) {
-      probs.six += 0.05; probs.four += 0.03; probs.wicket += 0.03;
-      probs.dot -= 0.05; probs.single -= 0.02;
-    } else if (this.overNumber < powerplayEnd) {
-      probs.four += 0.03; probs.six += 0.02; probs.dot -= 0.02;
-    } else {
-      probs.single += 0.05; probs.double += 0.02;
-      probs.dot += 0.02; probs.six -= 0.02;
+    // Bowling advantage → more dots, more wickets
+    if (matchupNorm < -0.2) {
+      probs.dot    += 0.08;
+      probs.wicket += 0.05;
+      probs.four   -= 0.06;
+      probs.six    -= 0.04;
     }
 
+    // ── 2. BATTING ATTRIBUTES ─────────────────────────────────────────────────
+    // Aggression: more risk, more boundaries, more wickets
+    probs.six    += (batAggression / 1000) * 1.5;
+    probs.four   += (batAggression / 1000) * 1.0;
+    probs.wicket += (batAggression / 1000) * 0.8;
+    probs.dot    -= (batAggression / 1000) * 1.2;
+
+    // Technique: reduces wickets, more singles/doubles
+    probs.wicket -= (batTechnique / 1000) * 1.2;
+    probs.single += (batTechnique / 1000) * 0.8;
+    probs.double += (batTechnique / 1000) * 0.5;
+    probs.triple += (batTechnique / 1000) * 0.2;
+
+    // Power: more sixes and fours, slightly more wickets
+    probs.six    += (batPower / 1000) * 1.5;
+    probs.four   += (batPower / 1000) * 1.0;
+    probs.wicket += (batPower / 1000) * 0.3;
+
+    // Consistency: reduces dot balls, reduces wickets
+    probs.dot    -= (batConsistency / 1000) * 1.0;
+    probs.wicket -= (batConsistency / 1000) * 1.0;
+    probs.single += (batConsistency / 1000) * 0.6;
+
+    // Stamina: affects late overs performance
+    const oversRemaining = this.maxOvers - this.overNumber;
+    if (oversRemaining <= 5) {
+      const staminaFactor = batStamina / 100;
+      probs.six    += 0.03 * staminaFactor;
+      probs.four   += 0.02 * staminaFactor;
+      probs.wicket -= 0.02 * staminaFactor;
+    }
+
+    // Temperament: handles pressure situations (chase, death overs)
     if (!this.isFirstInnings && this.target > 0) {
-      const currentScore = this.score2;
-      const ballsRemaining = (this.maxOvers * 6) - (this.overNumber * 6 + this.ballNumber);
-      const runsNeeded = this.target + 1 - currentScore;
-      const requiredRunRate = ballsRemaining > 0 ? (runsNeeded / ballsRemaining) * 6 : 0;
-      
-      if (requiredRunRate > 10) {
-        probs.six += 0.07; probs.four += 0.04;
-        probs.wicket += 0.04; probs.dot -= 0.08;
-      } else if (requiredRunRate > 8) {
-        probs.six += 0.04; probs.four += 0.03;
-        probs.wicket += 0.02; probs.dot -= 0.04;
-      }
-      
-      if (requiredRunRate < 6) {
-        probs.single += 0.05; probs.dot += 0.03;
-        probs.six -= 0.03; probs.wicket -= 0.02;
+      const pressure = this.getChasePressure();
+      if (pressure > 0.5) {
+        probs.wicket += (1 - batTemperament / 100) * pressure * 0.1;
+        probs.dot    += (1 - batTemperament / 100) * pressure * 0.05;
       }
     }
 
-    const currentWickets = this.currentWickets;
-    if (currentWickets >= 7) {
-      probs.wicket += 0.05; probs.dot += 0.05;
-      probs.six -= 0.03; probs.four -= 0.03;
-    } else if (currentWickets <= 2) {
-      probs.wicket -= 0.02; probs.single += 0.02;
+    // Shot Making: more boundaries, fewer dots
+    probs.four   += (batShotMaking / 1000) * 0.8;
+    probs.six    += (batShotMaking / 1000) * 0.6;
+    probs.dot    -= (batShotMaking / 1000) * 0.8;
+
+    // Running: affects singles and doubles
+    probs.single += (batRunning / 1000) * 0.5;
+    probs.double += (batRunning / 1000) * 0.3;
+    probs.triple += (batRunning / 1000) * 0.2;
+
+    // ── 3. BOWLING ATTRIBUTES ─────────────────────────────────────────────────
+    // Pace: more wickets, more dot balls (bounce/speed)
+    probs.wicket += (bowlPace / 1000) * 1.0;
+    probs.dot    += (bowlPace / 1000) * 0.5;
+    probs.six    -= (bowlPace / 1000) * 0.4;
+
+    // Accuracy: fewer wides/no-balls, more dots, more wickets
+    probs.dot    += (bowlAccuracy / 1000) * 1.2;
+    probs.wicket += (bowlAccuracy / 1000) * 0.8;
+    probs.wide   -= (bowlAccuracy / 1000) * 0.5;
+    probs.no_ball -= (bowlAccuracy / 1000) * 0.4;
+
+    // Variations: more wickets, fewer easy runs
+    probs.wicket += (bowlVariations / 1000) * 0.8;
+    probs.four   -= (bowlVariations / 1000) * 0.3;
+    probs.six    -= (bowlVariations / 1000) * 0.2;
+
+    // Spin: affects dot balls and wickets on turning tracks
+    if (this.pitchCondition === 'spin_friendly' || this.pitchCondition === 'dusty') {
+      probs.wicket += (bowlSpin / 1000) * 1.5;
+      probs.dot    += (bowlSpin / 1000) * 1.0;
+      probs.six    -= (bowlSpin / 1000) * 0.5;
     }
 
+    // Yorkers: reduces boundaries, increases wickets
+    probs.four   -= (bowlYorkers / 1000) * 0.8;
+    probs.six    -= (bowlYorkers / 1000) * 0.6;
+    probs.wicket += (bowlYorkers / 1000) * 0.8;
+    probs.dot    += (bowlYorkers / 1000) * 0.4;
+
+    // Bouncer: more wickets, fewer singles
+    probs.wicket += (bowlBouncer / 1000) * 0.6;
+    probs.single -= (bowlBouncer / 1000) * 0.4;
+    probs.six    += (bowlBouncer / 1000) * 0.3;
+
+    // ── 4. OVERS SITUATION ─────────────────────────────────────────────────────
+    const powerplayEnd  = Math.min(10, Math.floor(this.maxOvers * 0.3));
+    const middleEnd     = Math.floor(this.maxOvers * 0.7);
+    const deathEnd      = Math.floor(this.maxOvers * 0.9);
+
+    if (this.overNumber >= deathEnd) {
+      // Death overs: more boundaries, more wickets, fewer dots
+      probs.six    += 0.06; probs.four += 0.04; probs.wicket += 0.04;
+      probs.dot    -= 0.06; probs.single -= 0.03;
+    } else if (this.overNumber >= middleEnd) {
+      // Middle/death transition
+      probs.six    += 0.03; probs.four += 0.02;
+      probs.wicket += 0.02; probs.dot -= 0.03;
+    } else if (this.overNumber < powerplayEnd) {
+      // Powerplay: more boundaries, fewer wickets
+      probs.four   += 0.04; probs.six += 0.03;
+      probs.wicket -= 0.02; probs.dot -= 0.02;
+    } else {
+      // Middle overs: more singles, more dots
+      probs.single += 0.06; probs.double += 0.02;
+      probs.dot    += 0.03; probs.six    -= 0.02;
+    }
+
+    // ── 5. CHASE PRESSURE ─────────────────────────────────────────────────────
+    if (!this.isFirstInnings && this.target > 0) {
+      const pressure = this.getChasePressure();
+      if (pressure > 0.6) {
+        probs.six    += 0.08; probs.four += 0.05;
+        probs.wicket += 0.06; probs.dot  -= 0.10;
+      } else if (pressure > 0.3) {
+        probs.six    += 0.04; probs.four += 0.03;
+        probs.wicket += 0.03; probs.dot  -= 0.05;
+      } else if (pressure < -0.3) {
+        // Comfortable chase
+        probs.single += 0.06; probs.dot  += 0.04;
+        probs.six    -= 0.03; probs.wicket -= 0.02;
+      }
+    }
+
+    // ── 6. WICKETS IN HAND ─────────────────────────────────────────────────────
+    const wicketsLeft = 10 - this.currentWickets;
+    if (wicketsLeft <= 2) {
+      probs.wicket += 0.06; probs.dot += 0.06;
+      probs.six    -= 0.04; probs.four -= 0.03;
+    } else if (wicketsLeft <= 4) {
+      probs.wicket += 0.03; probs.dot += 0.03;
+    }
+
+    // ── 7. PITCH CONDITIONS ────────────────────────────────────────────────────
     switch (this.pitchCondition) {
-      case 'batting_friendly':
-      case 'flat':
-        probs.four += 0.05; probs.six += 0.05;
-        probs.wicket -= 0.03; probs.dot -= 0.03;
+      case 'batting_friendly': case 'flat':
+        probs.four   += 0.06; probs.six += 0.06;
+        probs.wicket -= 0.04; probs.dot -= 0.04;
         break;
-      case 'bowling_friendly':
-      case 'green':
-        probs.wicket += 0.05; probs.dot += 0.05;
-        probs.four -= 0.03; probs.six -= 0.03;
+      case 'bowling_friendly': case 'green':
+        probs.wicket += 0.06; probs.dot += 0.06;
+        probs.four   -= 0.04; probs.six -= 0.04;
         break;
-      case 'spin_friendly':
-      case 'dusty':
-        probs.wicket += 0.03; probs.dot += 0.04; probs.six -= 0.02;
+      case 'spin_friendly': case 'dusty':
+        probs.wicket += 0.04; probs.dot += 0.05;
+        probs.six    -= 0.03;
         break;
     }
 
+    // ── 8. TEAM CHEMISTRY ─────────────────────────────────────────────────────
     const chemMod = chemistry / 500;
-    probs.four += chemMod * 0.02;
-    probs.six += chemMod * 0.01;
-    probs.wicket -= chemMod * 0.02;
+    probs.four   += chemMod * 0.03;
+    probs.six    += chemMod * 0.015;
+    probs.wicket -= chemMod * 0.03;
 
-    probs.dot = clamp(probs.dot, 0.05, 0.6);
-    probs.single = clamp(probs.single, 0.1, 0.45);
-    probs.double = clamp(probs.double, 0.02, 0.2);
-    probs.triple = clamp(probs.triple, 0.005, 0.05);
-    probs.four = clamp(probs.four, 0.02, 0.3);
-    probs.six = clamp(probs.six, 0.01, 0.2);
-    probs.wicket = clamp(probs.wicket, 0.01, 0.2);
-    probs.wide = clamp(probs.wide, 0.005, 0.05);
-    probs.no_ball = clamp(probs.no_ball, 0.005, 0.03);
+    // ── 9. NORMALIZE & CLAMP ───────────────────────────────────────────────────
+    probs.dot    = clamp(probs.dot,    0.03, 0.55);
+    probs.single = clamp(probs.single, 0.08, 0.42);
+    probs.double = clamp(probs.double, 0.02, 0.18);
+    probs.triple = clamp(probs.triple,  0.003, 0.06);
+    probs.four   = clamp(probs.four,   0.01, 0.28);
+    probs.six    = clamp(probs.six,    0.005, 0.18);
+    probs.wicket = clamp(probs.wicket, 0.01, 0.22);
+    probs.wide   = clamp(probs.wide,   0.003, 0.06);
+    probs.no_ball= clamp(probs.no_ball, 0.003, 0.04);
 
     const total = Object.values(probs).reduce((a, b) => a + b, 0);
-    for (const key in probs) {
-      probs[key] /= total;
-    }
+    for (const key in probs) probs[key] /= total;
 
     const roll = Math.random();
     let cum = 0;
@@ -644,6 +737,17 @@ class MatchEngine {
       if (roll < cum) return outcome;
     }
     return 'dot';
+  }
+
+  getChasePressure() {
+    if (this.target <= 0) return 0;
+    const ballsRemaining = (this.maxOvers * 6) - (this.overNumber * 6 + this.ballNumber);
+    if (ballsRemaining <= 0) return 1;
+    const runsNeeded  = this.target + 1 - this.score2;
+    const requiredRR  = (runsNeeded / ballsRemaining) * 6;
+    const currentRR   = this.overNumber > 0 ? (this.score2 / this.overNumber) : 0;
+    const diff        = requiredRR - currentRR;
+    return clamp(diff / 6, -1, 1); // -1 = very comfortable, +1 = very pressured
   }
 
   swapStrike() {
