@@ -1,4 +1,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: cricket-game
+  name: cricket-backend
+  labels:
+    app.kubernetes.io/name: cricket-backend
+    app.kubernetes.io/managed-by: kubectl
