@@ -2,7 +2,7 @@ name: Deploy Backend to OCI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "master", "main" ]
 
 env:
   REGISTRY: ghcr.io
@@ -64,7 +64,7 @@ jobs:
             cd node-backend
             
             # Pull latest git changes to ensure compose configuration matches
-            git pull origin main
+            git pull origin master
             
             # Log in to registry on VM (uses github token to pull)
             echo "${{ secrets.GITHUB_TOKEN }}" | sudo docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
