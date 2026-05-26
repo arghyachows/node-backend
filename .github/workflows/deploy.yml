@@ -70,10 +70,10 @@ jobs:
             echo "${{ secrets.GITHUB_TOKEN }}" | sudo docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
             
             # Pull new image version
-            sudo docker-compose pull backend
+            sudo docker compose pull backend
             
             # Restart containers
-            sudo docker-compose up -d
+            sudo docker compose up -d
             
             # Clean up old/dangling Docker images to save space
             sudo docker image prune -f
