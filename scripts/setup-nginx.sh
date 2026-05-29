@@ -11,6 +11,7 @@ set -euo pipefail
 OCI_REGION="${OCI_REGION:-us-ashburn-1}"
 OCI_NAMESPACE="${OCI_NAMESPACE:-your_tenancy_namespace}"
 OCI_BUCKET="${OCI_BUCKET:-your_bucket_name}"
+DOMAIN_NAME="${DOMAIN_NAME:-_}"
 
 echo "================================================================"
 echo "Configuring Nginx on OCI VM (Object Storage Proxy Mode)"
@@ -60,17 +61,21 @@ map \$uri \$custom_content_type {
     ~*\\.svg\$                   "image/svg+xml";
     ~*\\.ico\$                   "image/x-icon";
     ~*\\.json\$                  "application/json";
+    ~*\\.otf\$                   "font/otf";
+    ~*\\.ttf\$                   "font/ttf";
+    ~*\\.woff\$                  "font/woff";
+    ~*\\.woff2\$                 "font/woff2";
 }
 
 server {
     listen 80;
-    server_name _;
+    server_name $DOMAIN_NAME;
 
     # Serve frontend from OCI Object Storage Bucket
     location / {
         # Check if the requested file has a static asset extension
         set \$is_static 0;
-        if (\$uri ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|json|wasm)$) {
+        if (\$uri ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|otf|eot|json|wasm)$) {
             set \$is_static 1;
         }
 
@@ -95,6 +100,26 @@ server {
         # Cache static assets locally on the VM to speed up loads and reduce egress costs
         proxy_cache_valid 200 60m;
         add_header X-Cache-Status \$upstream_cache_status;
+    }
+
+    # Proxy health check to backend
+    location /health {
+        proxy_pass http://127.0.0.1:3000/health;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    # Proxy Prometheus metrics to backend
+    location /metrics {
+        proxy_pass http://127.0.0.1:3000/metrics;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
     }
 
     # Proxy REST API requests to backend

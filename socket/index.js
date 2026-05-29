@@ -1,6 +1,7 @@
 const { Server } = require('socket.io');
+const { createAdapter } = require('@socket.io/redis-adapter');
 const logger = require('../utils/logger');
-const { getMatchState } = require('../services/redis');
+const { redis, getMatchState } = require('../services/redis');
 
 function initSocket(server) {
   const io = new Server(server, {
@@ -17,6 +18,18 @@ function initSocket(server) {
     cookie: false,  // Disable cookies for cross-origin
     allowUpgrades: true,
   });
+
+  // Enable Redis adapter for scaling across multiple instances in production
+  if (process.env.REDIS_URL && process.env.NODE_ENV === 'production') {
+    try {
+      const pubClient = redis.duplicate();
+      const subClient = redis.duplicate();
+      io.adapter(createAdapter(pubClient, subClient));
+      logger.info('📡 Socket.IO Redis adapter enabled for multi-node scaling');
+    } catch (err) {
+      logger.error('❌ Failed to initialize Socket.IO Redis adapter:', err);
+    }
+  }
 
   io.on('connection', (socket) => {
     logger.info(`🔌 Client connected: ${socket.id}`);

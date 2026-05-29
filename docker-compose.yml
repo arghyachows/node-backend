@@ -9,7 +9,7 @@ services:
       - "3000:3000"
     environment:
       - PORT=3000
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=${REDIS_URL}
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
       - NODE_ENV=production
@@ -19,6 +19,8 @@ services:
     restart: unless-stopped
     networks:
       - cricket-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   redis:
     image: redis:7-alpine
