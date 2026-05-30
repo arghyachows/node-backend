@@ -60,6 +60,24 @@ function initSocket(server) {
             currentBatsman: state.currentBatsman?.name,
             nonStriker: state.nonStriker?.name,
             currentBowler: state.currentBowler?.name,
+            matchResult: state.matchComplete ? (() => {
+              const battingFirstName = state.homeBatsFirst ? state.homeTeamName : state.awayTeamName;
+              const battingSecondName = state.homeBatsFirst ? state.awayTeamName : state.homeTeamName;
+              if (state.isSuperOver) {
+                if (state.score2 > state.score1) {
+                  return `${battingSecondName} wins the Super Over by ${10 - state.wickets2} wickets!`;
+                } else if (state.score1 > state.score2) {
+                  return `${battingFirstName} wins the Super Over by ${state.score1 - state.score2} runs!`;
+                }
+                return `${battingSecondName} wins the Super Over!`;
+              }
+              if (state.score2 > state.score1) {
+                return `${battingSecondName} wins by ${10 - state.wickets2} wickets!`;
+              } else if (state.score1 > state.score2) {
+                return `${battingFirstName} wins by ${state.score1 - state.score2} runs!`;
+              }
+              return 'Match tied!';
+            })() : null,
           } : null,
         });
       } catch (err) {
