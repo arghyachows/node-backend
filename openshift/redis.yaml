@@ -1,0 +1,77 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cricket-redis-data
+  labels:
+    app: cricket-redis
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cricket-redis
+  labels:
+    app: cricket-redis
+    app.kubernetes.io/part-of: cricket-ultimate-manager
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: cricket-redis
+  template:
+    metadata:
+      labels:
+        app: cricket-redis
+    spec:
+      containers:
+        - name: redis
+          # OpenShift-friendly image (runs as arbitrary UID)
+          image: quay.io/sclorg/redis-7-c9s:latest
+          ports:
+            - containerPort: 6379
+              name: redis
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cricket-backend-secrets
+                  key: REDIS_PASSWORD
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          readinessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/redis/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: cricket-redis-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cricket-redis
+  labels:
+    app: cricket-redis
+spec:
+  selector:
+    app: cricket-redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
