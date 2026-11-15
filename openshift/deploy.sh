@@ -26,6 +26,17 @@ oc create secret generic cricket-backend-secrets \
 echo "==> Applying manifests"
 oc apply -f openshift/redis.yaml -f openshift/backend.yaml
 
+# The sandbox cluster DNS returns no records for *.supabase.co project hosts,
+# so pin the addresses resolved here into the pod's /etc/hosts.
+SUPABASE_HOST=${SUPABASE_URL#*://}; SUPABASE_HOST=${SUPABASE_HOST%%/*}
+SUPABASE_IPS=$(getent ahostsv4 "$SUPABASE_HOST" | awk '{print $1}' | sort -u)
+if [ -n "$SUPABASE_IPS" ]; then
+  echo "==> Pinning $SUPABASE_HOST to" $SUPABASE_IPS
+  ALIASES=$(for ip in $SUPABASE_IPS; do printf '{"ip":"%s","hostnames":["%s"]},' "$ip" "$SUPABASE_HOST"; done)
+  oc patch deployment/cricket-backend --type=merge \
+    -p "{\"spec\":{\"template\":{\"spec\":{\"hostAliases\":[${ALIASES%,}]}}}}"
+fi
+
 echo "==> Building image from local source"
 oc start-build cricket-backend --from-dir=. --follow --wait
 
