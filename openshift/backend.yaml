@@ -1,0 +1,135 @@
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: cricket-backend
+  labels:
+    app: cricket-backend
+spec:
+  lookupPolicy:
+    local: true
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: cricket-backend
+  labels:
+    app: cricket-backend
+spec:
+  source:
+    type: Binary
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: cricket-backend:latest
+  resources:
+    limits:
+      memory: 1Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cricket-backend-config
+  labels:
+    app: cricket-backend
+data:
+  NODE_ENV: "production"
+  PORT: "8080"
+  REDIS_HOST: "cricket-redis"
+  REDIS_PORT: "6379"
+  WATSONX_URL: "https://us-south.ml.cloud.ibm.com"
+  WATSONX_MODEL: "meta-llama/llama-4-maverick-17b-128e-instruct-fp8"
+  CORS_ORIGIN: "*"
+  LOG_LEVEL: "info"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cricket-backend
+  labels:
+    app: cricket-backend
+    app.kubernetes.io/part-of: cricket-ultimate-manager
+  annotations:
+    image.openshift.io/triggers: '[{"from":{"kind":"ImageStreamTag","name":"cricket-backend:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"cricket-backend\")].image"}]'
+    app.openshift.io/connects-to: '[{"apiVersion":"apps/v1","kind":"Deployment","name":"cricket-redis"}]'
+spec:
+  # Single replica: Socket.IO match state is kept per-pod.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cricket-backend
+  template:
+    metadata:
+      labels:
+        app: cricket-backend
+    spec:
+      containers:
+        - name: cricket-backend
+          image: cricket-backend:latest
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - configMapRef:
+                name: cricket-backend-config
+            - secretRef:
+                name: cricket-backend-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cricket-backend
+  labels:
+    app: cricket-backend
+spec:
+  selector:
+    app: cricket-backend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: cricket-backend
+  labels:
+    app: cricket-backend
+  annotations:
+    haproxy.router.openshift.io/timeout: 3600s
+spec:
+  to:
+    kind: Service
+    name: cricket-backend
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
